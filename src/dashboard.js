@@ -1714,7 +1714,15 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/connect' && method === 'POST') {
     try {
       await fetchApi('/instance/create', 'POST', { instanceName: INSTANCE, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(() => {})
-      json(await fetchApi(`/instance/connect/${INSTANCE}`, 'GET'))
+      // QR code gerado async — tenta até 5x com 2s de intervalo
+      let result = {}
+      for (let i = 0; i < 5; i++) {
+        await sleep(2000)
+        result = await fetchApi(`/instance/connect/${INSTANCE}`, 'GET').catch(() => ({}))
+        console.log(`[Connect] tentativa ${i+1}:`, JSON.stringify(result).slice(0, 200))
+        if (result.qrcode?.base64 || result.base64) break
+      }
+      json(result)
     } catch (e) { json({ error: e.message }, 500) }
     return
   }
