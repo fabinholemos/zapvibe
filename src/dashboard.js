@@ -918,8 +918,9 @@ async function doConnect() {
   document.getElementById('qr-idle').classList.add('hidden')
   document.getElementById('qr-idle').classList.remove('flex')
   const r = await fetch('/api/connect', {method:'POST'}).then(r=>r.json())
-  if (r.base64) {
-    document.getElementById('qr-img').src = r.base64
+  const qrBase64 = r.qrcode?.base64 || r.base64
+  if (qrBase64) {
+    document.getElementById('qr-img').src = qrBase64
     document.getElementById('qr-wrap').classList.remove('hidden')
     document.getElementById('qr-wrap').classList.add('flex')
   }
