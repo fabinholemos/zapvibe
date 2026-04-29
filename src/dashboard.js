@@ -278,12 +278,14 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function fetchApi(urlPath, method, body) {
   return new Promise((resolve, reject) => {
     const u = new URL(API_URL + urlPath)
+    const isHttps = u.protocol === 'https:'
+    const transport = isHttps ? require('https') : require('http')
     const opts = {
-      hostname: u.hostname, port: u.port || 80,
+      hostname: u.hostname, port: u.port || (isHttps ? 443 : 80),
       path: u.pathname, method,
       headers: { apikey: API_KEY, 'Content-Type': 'application/json' }
     }
-    const req = http.request(opts, res => {
+    const req = transport.request(opts, res => {
       let d = ''
       res.on('data', c => d += c)
       res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({}) } })
