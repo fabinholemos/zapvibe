@@ -17,6 +17,9 @@ async function init() {
       role TEXT DEFAULT 'user',
       status TEXT DEFAULT 'pending',
       instance_name TEXT,
+      name TEXT DEFAULT '',
+      phone TEXT DEFAULT '',
+      trial_ends_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -87,6 +90,9 @@ async function init() {
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS instance_name TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
@@ -375,13 +381,24 @@ async function getUserById(id) {
 
 async function getAllUsers() {
   const { rows } = await pool.query(
-    'SELECT id, email, role, status, instance_name, created_at FROM users ORDER BY created_at'
+    'SELECT id, email, name, phone, role, status, instance_name, trial_ends_at, created_at FROM users ORDER BY created_at'
   )
   return rows
 }
 
+async function registerUser(name, email, phone, passwordHash) {
+  const { rows } = await pool.query(
+    `INSERT INTO users (name, email, phone, password_hash, role, status)
+     VALUES ($1,$2,$3,$4,'user','pending') RETURNING id`,
+    [name, email, phone, passwordHash]
+  )
+  const id = rows[0].id
+  await pool.query('UPDATE users SET instance_name=$1 WHERE id=$2', ['zv' + id, id])
+  return id
+}
+
 async function updateUser(id, updates) {
-  const allowed = ['status', 'role', 'instance_name', 'password_hash']
+  const allowed = ['status', 'role', 'instance_name', 'password_hash', 'trial_ends_at', 'name', 'phone']
   const sets = []
   const vals = []
   let i = 1
@@ -429,6 +446,6 @@ module.exports = {
   getCampaignLog, addCampaignLog,
   getGroups, addGroup, updateGroup, deleteGroup,
   getLidEntry, saveLidEntry,
-  upsertUser, getUserByEmail, getUserByInstance, getUserById, getAllUsers, updateUser, deleteUser,
+  upsertUser, getUserByEmail, getUserByInstance, getUserById, getAllUsers, updateUser, deleteUser, registerUser,
   createSession, getSession, deleteSession
 }

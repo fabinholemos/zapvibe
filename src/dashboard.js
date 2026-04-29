@@ -1678,6 +1678,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 .gradient-text{background:linear-gradient(135deg,#7c3aed,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
 .card-hover{transition:all .2s;border:1px solid transparent}
 .card-hover:hover{border-color:rgb(124 58 237 / 0.4);transform:translateY(-2px)}
+.btn-wpp{background:#25D366;transition:background .2s}.btn-wpp:hover{background:#1ebe5d}
 </style>
 </head>
 <body class="bg-gray-950 text-white">
@@ -1689,15 +1690,19 @@ const LANDING_HTML = `<!DOCTYPE html>
       <div class="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-base">⚡</div>
       <span class="font-bold text-lg">ZapVibe</span>
     </div>
-    <a href="/login" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Entrar</a>
+    <div class="flex items-center gap-2">
+      <a href="http://wa.link/k3gl1y" target="_blank" class="btn-wpp hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-medium rounded-xl">💬 Suporte</a>
+      <a href="/login" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-xl transition-colors">Entrar</a>
+      <a href="/register" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Testar grátis</a>
+    </div>
   </div>
 </nav>
 
 <!-- Hero -->
 <section class="max-w-6xl mx-auto px-4 pt-20 pb-16 text-center">
-  <div class="inline-flex items-center gap-2 bg-violet-950/60 border border-violet-700/40 text-violet-300 text-xs font-medium px-3 py-1.5 rounded-full mb-6">
-    <span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>
-    Automatize seu WhatsApp com Inteligência Artificial
+  <div class="inline-flex items-center gap-2 bg-green-950/60 border border-green-700/40 text-green-300 text-xs font-medium px-3 py-1.5 rounded-full mb-6">
+    <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>
+    7 dias grátis — sem cartão de crédito
   </div>
   <h1 class="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-tight mb-6">
     Dispare mensagens no<br><span class="gradient-text">WhatsApp com IA</span>
@@ -1706,9 +1711,10 @@ const LANDING_HTML = `<!DOCTYPE html>
     Envie campanhas personalizadas para centenas de contatos, responda automaticamente e acompanhe tudo em um painel simples. Sem complicação, sem risco de ban.
   </p>
   <div class="flex flex-col sm:flex-row gap-3 justify-center">
-    <a href="/login" class="px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Começar agora →</a>
-    <a href="#features" class="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl transition-colors text-base">Ver funcionalidades</a>
+    <a href="/register" class="px-6 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Testar 7 dias grátis →</a>
+    <a href="#features" class="px-6 py-3.5 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl transition-colors text-base">Ver funcionalidades</a>
   </div>
+  <p class="text-xs text-gray-600 mt-4">Sem cartão de crédito · Acesso liberado em minutos</p>
 </section>
 
 <!-- Features -->
@@ -1735,17 +1741,106 @@ const LANDING_HTML = `<!DOCTYPE html>
 <!-- CTA -->
 <section class="max-w-3xl mx-auto px-4 py-16 text-center">
   <div class="bg-gradient-to-br from-violet-950/60 to-purple-950/60 border border-violet-800/40 rounded-3xl p-10">
-    <h2 class="text-2xl sm:text-3xl font-bold mb-4">Pronto para escalar suas vendas?</h2>
-    <p class="text-gray-400 mb-8">Solicite acesso e comece a usar ZapVibe hoje mesmo.</p>
-    <a href="/login" class="inline-block px-8 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Acessar plataforma →</a>
+    <h2 class="text-2xl sm:text-3xl font-bold mb-4">Comece grátis hoje mesmo</h2>
+    <p class="text-gray-400 mb-8">Crie sua conta em 1 minuto e teste por 7 dias sem pagar nada.</p>
+    <a href="/register" class="inline-block px-8 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Criar conta grátis →</a>
+    <p class="text-xs text-gray-600 mt-4">Dúvidas? <a href="http://wa.link/k3gl1y" target="_blank" class="text-green-500 hover:text-green-400">Fale com a gente no WhatsApp</a></p>
   </div>
 </section>
 
+<!-- Suporte flutuante -->
+<a href="http://wa.link/k3gl1y" target="_blank"
+   class="fixed bottom-5 right-5 btn-wpp text-white px-4 py-3 rounded-2xl shadow-lg flex items-center gap-2 text-sm font-medium z-50">
+  💬 <span class="hidden sm:inline">Suporte via WhatsApp</span>
+</a>
+
 <!-- Footer -->
 <footer class="border-t border-gray-800/50 py-8 text-center text-xs text-gray-600">
-  <p>© ${new Date().getFullYear()} ZapVibe. Todos os direitos reservados.</p>
+  <p>© ${new Date().getFullYear()} ZapVibe. Todos os direitos reservados. ·
+    <a href="http://wa.link/k3gl1y" target="_blank" class="hover:text-gray-400">Suporte</a>
+  </p>
 </footer>
 
+</body>
+</html>`
+
+// ── Register page ─────────────────────────────────────────────────────────────
+
+const REGISTER_HTML = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZapVibe — Criar conta grátis</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{font-family:'Inter',sans-serif}</style>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex items-center justify-center px-4">
+<div class="w-full max-w-sm">
+  <div class="flex flex-col items-center mb-8">
+    <div class="w-12 h-12 rounded-2xl bg-violet-600 flex items-center justify-center text-2xl mb-3">⚡</div>
+    <h1 class="text-xl font-bold">ZapVibe</h1>
+    <p class="text-sm text-gray-500 mt-1">7 dias grátis — sem cartão de crédito</p>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+    <h2 class="text-base font-semibold mb-5">Criar conta</h2>
+    <div id="err" class="hidden bg-red-950 border border-red-800 text-red-300 text-sm px-4 py-2.5 rounded-xl mb-4"></div>
+    <div id="ok" class="hidden bg-green-950 border border-green-800 text-green-300 text-sm px-4 py-2.5 rounded-xl mb-4"></div>
+    <form id="form" class="space-y-4">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">Nome completo</label>
+        <input id="name" type="text" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 transition-colors" placeholder="Seu nome">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">E-mail</label>
+        <input id="email" type="email" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 transition-colors" placeholder="seu@email.com">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">WhatsApp</label>
+        <input id="phone" type="tel" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 transition-colors" placeholder="(11) 99999-9999">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">Senha</label>
+        <input id="pass" type="password" required minlength="6" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 transition-colors" placeholder="Mínimo 6 caracteres">
+      </div>
+      <button type="submit" class="w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-2.5 rounded-xl transition-colors text-sm">
+        Criar conta grátis
+      </button>
+    </form>
+  </div>
+  <p class="text-center text-xs text-gray-600 mt-4">Já tem conta? <a href="/login" class="text-violet-400 hover:text-violet-300">Entrar</a></p>
+</div>
+<script>
+document.getElementById('form').onsubmit = async e => {
+  e.preventDefault()
+  const btn = e.target.querySelector('button')
+  btn.disabled = true; btn.textContent = 'Criando conta...'
+  const err = document.getElementById('err')
+  const ok = document.getElementById('ok')
+  err.classList.add('hidden'); ok.classList.add('hidden')
+  const res = await fetch('/api/register', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      name: document.getElementById('name').value,
+      email: document.getElementById('email').value,
+      phone: document.getElementById('phone').value,
+      password: document.getElementById('pass').value
+    })
+  })
+  const d = await res.json()
+  if (res.ok) {
+    ok.textContent = 'Conta criada! Aguarde a liberação do acesso. Entraremos em contato pelo WhatsApp.'
+    ok.classList.remove('hidden')
+    e.target.reset()
+    btn.textContent = 'Conta criada!'
+  } else {
+    err.textContent = d.error || 'Erro ao criar conta'
+    err.classList.remove('hidden')
+    btn.disabled = false; btn.textContent = 'Criar conta grátis'
+  }
+}
+</script>
 </body>
 </html>`
 
@@ -1763,7 +1858,6 @@ function getAdminHTML(email) { return `<!DOCTYPE html>
 <body class="bg-gray-950 text-white min-h-screen">
 <div class="max-w-5xl mx-auto px-4 py-8">
 
-  <!-- Header -->
   <div class="flex items-center gap-3 mb-8">
     <div class="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center text-lg">⚡</div>
     <div><h1 class="text-lg font-bold">ZapVibe</h1><p class="text-xs text-gray-500">Painel Admin</p></div>
@@ -1774,11 +1868,13 @@ function getAdminHTML(email) { return `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- Users table -->
   <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
     <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-      <h2 class="font-semibold">Usuários</h2>
-      <button onclick="openAddUser()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">+ Novo usuário</button>
+      <div>
+        <h2 class="font-semibold">Usuários</h2>
+        <p class="text-xs text-gray-500 mt-0.5">Cadastros via landing page aparecem aqui como Pendente</p>
+      </div>
+      <button onclick="openAddUser()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">+ Novo</button>
     </div>
     <div id="users-list" class="divide-y divide-gray-800">
       <p class="text-center py-8 text-gray-600 text-sm">Carregando...</p>
@@ -1796,6 +1892,14 @@ function getAdminHTML(email) { return `<!DOCTYPE html>
         <input id="add-email" type="email" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500" placeholder="usuario@email.com"></div>
       <div><label class="block text-xs text-gray-400 mb-1">Senha inicial</label>
         <input id="add-pass" type="text" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500" placeholder="Senha temporária"></div>
+      <div><label class="block text-xs text-gray-400 mb-1">Dias de acesso</label>
+        <div class="flex gap-1.5 flex-wrap mb-1" id="days-btns">
+          ${[7,15,30].map(d => `<button type="button" data-days="${d}" onclick="selectDays(${d})" class="days-opt px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors">${d} dias</button>`).join('')}
+          <button type="button" data-days="custom" onclick="selectDays('custom')" class="days-opt px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors">Personalizado</button>
+        </div>
+        <input id="add-days-custom" type="number" min="1" class="hidden w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500" placeholder="Número de dias">
+        <input id="add-days" type="hidden" value="7">
+      </div>
       <div><label class="block text-xs text-gray-400 mb-1">Status</label>
         <select id="add-status" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500">
           <option value="active">Ativo</option>
@@ -1809,8 +1913,34 @@ function getAdminHTML(email) { return `<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Set days modal -->
+<div id="modal-days" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 w-full max-w-xs">
+    <h3 class="font-semibold mb-1" id="days-modal-title">Definir dias de acesso</h3>
+    <p id="days-modal-sub" class="text-xs text-gray-500 mb-4"></p>
+    <div class="flex gap-1.5 flex-wrap mb-3">
+      ${[7,15,30].map(d => `<button type="button" onclick="applyDays(${d})" class="px-3 py-1.5 text-xs rounded-lg bg-gray-800 hover:bg-violet-700 text-gray-300 transition-colors">${d} dias</button>`).join('')}
+    </div>
+    <div class="flex gap-2">
+      <input id="days-custom-input" type="number" min="1" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500" placeholder="Personalizado">
+      <button onclick="applyCustomDays()" class="px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm">OK</button>
+    </div>
+    <button onclick="closeDaysModal()" class="w-full mt-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-xl text-sm text-gray-400">Cancelar</button>
+  </div>
+</div>
+
 <script>
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+let daysTargetId = null
+
+function trialLabel(u) {
+  if (!u.trial_ends_at) return '<span class="text-gray-600">Sem trial</span>'
+  const d = new Date(u.trial_ends_at)
+  const days = Math.ceil((d - Date.now()) / 86400000)
+  if (days < 0) return \`<span class="text-red-400">Expirado \${Math.abs(days)}d atrás</span>\`
+  if (days === 0) return '<span class="text-amber-400">Expira hoje</span>'
+  return \`<span class="text-green-400">\${days}d restantes</span>\`
+}
 
 async function loadUsers() {
   const res = await fetch('/api/admin/users')
@@ -1818,17 +1948,21 @@ async function loadUsers() {
   const el = document.getElementById('users-list')
   if (!users.length) { el.innerHTML = '<p class="text-center py-8 text-gray-600 text-sm">Nenhum usuário.</p>'; return }
   el.innerHTML = users.map(u => \`
-    <div class="px-5 py-3.5 flex items-center gap-3 hover:bg-gray-800/40 transition-colors">
-      <div class="flex-1 min-w-0">
-        <p class="text-sm font-medium truncate">\${esc(u.email)}</p>
-        <p class="text-xs text-gray-500">Instância: \${esc(u.instance_name||'—')} · Criado: \${new Date(u.created_at).toLocaleDateString('pt-BR')}</p>
-      </div>
-      <span class="text-xs font-medium px-2 py-0.5 rounded-full \${u.role==='admin'?'bg-violet-900/60 text-violet-300':'bg-gray-800 text-gray-400'}">\${u.role}</span>
-      <div class="flex items-center gap-1">
-        <select onchange="setStatus(\${u.id},this.value)" class="text-xs bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 focus:outline-none">
-          \${['pending','active','blocked'].map(s=>\`<option value="\${s}" \${u.status===s?'selected':''}>\${s==='pending'?'Pendente':s==='active'?'Ativo':'Bloqueado'}</option>\`).join('')}
-        </select>
-        \${u.role !== 'admin' ? \`<button onclick="deleteUser(\${u.id},'\${esc(u.email)}')" class="text-xs px-2 py-1 bg-red-950/60 hover:bg-red-900/60 text-red-400 rounded-lg transition-colors">✕</button>\` : ''}
+    <div class="px-5 py-3.5 hover:bg-gray-800/40 transition-colors">
+      <div class="flex items-start gap-3">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium">\${esc(u.email)}</p>
+          \${u.name ? \`<p class="text-xs text-gray-400">\${esc(u.name)} · \${esc(u.phone||'')}</p>\` : ''}
+          <p class="text-xs text-gray-500 mt-0.5">Instância: \${esc(u.instance_name||'—')} · \${new Date(u.created_at).toLocaleDateString('pt-BR')}</p>
+        </div>
+        <div class="flex items-center gap-1.5 flex-wrap justify-end">
+          <span class="text-xs">\${trialLabel(u)}</span>
+          <button onclick="openDaysModal(\${u.id}, '\${esc(u.email)}')" class="text-xs px-2 py-1 bg-gray-800 hover:bg-violet-700/60 text-gray-300 rounded-lg transition-colors">⏱ Dias</button>
+          <select onchange="setStatus(\${u.id},this.value)" class="text-xs bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 focus:outline-none">
+            \${['pending','active','blocked'].map(s=>\`<option value="\${s}" \${u.status===s?'selected':''}>\${s==='pending'?'Pendente':s==='active'?'Ativo':'Bloqueado'}</option>\`).join('')}
+          </select>
+          \${u.role!=='admin'?\`<button onclick="deleteUser(\${u.id},'\${esc(u.email)}')" class="text-xs px-2 py-1 bg-red-950/60 hover:bg-red-900/60 text-red-400 rounded-lg">✕</button>\`:''}
+        </div>
       </div>
     </div>\`).join('')
 }
@@ -1844,7 +1978,38 @@ async function deleteUser(id, email) {
   loadUsers()
 }
 
-function openAddUser() { document.getElementById('modal-add').classList.remove('hidden') }
+function openDaysModal(id, email) {
+  daysTargetId = id
+  document.getElementById('days-modal-sub').textContent = email
+  document.getElementById('modal-days').classList.remove('hidden')
+  document.getElementById('days-custom-input').value = ''
+}
+function closeDaysModal() { document.getElementById('modal-days').classList.add('hidden'); daysTargetId = null }
+
+async function applyDays(days) {
+  await fetch(\`/api/admin/users/\${daysTargetId}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ trial_days: days, status: 'active' }) })
+  closeDaysModal(); loadUsers()
+}
+async function applyCustomDays() {
+  const v = parseInt(document.getElementById('days-custom-input').value)
+  if (!v || v < 1) { alert('Informe um número válido'); return }
+  await applyDays(v)
+}
+
+function selectDays(val) {
+  document.querySelectorAll('.days-opt').forEach(b => b.classList.remove('bg-violet-700','text-white'))
+  document.querySelectorAll('.days-opt').forEach(b => b.classList.add('bg-gray-800','text-gray-300'))
+  const btn = document.querySelector(\`.days-opt[data-days="\${val}"]\`)
+  if (btn) { btn.classList.remove('bg-gray-800','text-gray-300'); btn.classList.add('bg-violet-700','text-white') }
+  const cInput = document.getElementById('add-days-custom')
+  if (val === 'custom') { cInput.classList.remove('hidden'); document.getElementById('add-days').value = '' }
+  else { cInput.classList.add('hidden'); document.getElementById('add-days').value = val }
+}
+
+function openAddUser() {
+  document.getElementById('modal-add').classList.remove('hidden')
+  selectDays(7)
+}
 function closeAddUser() { document.getElementById('modal-add').classList.add('hidden') }
 
 document.getElementById('form-add').onsubmit = async e => {
@@ -1853,10 +2018,11 @@ document.getElementById('form-add').onsubmit = async e => {
   btn.disabled = true
   const errEl = document.getElementById('add-err')
   errEl.classList.add('hidden')
+  let days = parseInt(document.getElementById('add-days').value) || parseInt(document.getElementById('add-days-custom').value) || 7
   const res = await fetch('/api/admin/users', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ email: document.getElementById('add-email').value, password: document.getElementById('add-pass').value, status: document.getElementById('add-status').value })
+    body: JSON.stringify({ email: document.getElementById('add-email').value, password: document.getElementById('add-pass').value, status: document.getElementById('add-status').value, trial_days: days })
   })
   const data = await res.json()
   if (res.ok) { closeAddUser(); loadUsers(); e.target.reset() }
@@ -1881,6 +2047,27 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url === '/favicon.ico') { res.writeHead(204); res.end(); return }
+
+  // Register page
+  if (url === '/register' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(REGISTER_HTML); return
+  }
+
+  if (url === '/api/register' && method === 'POST') {
+    const body = await readBody(req)
+    const name = (body.name || '').trim()
+    const email = (body.email || '').toLowerCase().trim()
+    const phone = (body.phone || '').trim()
+    const password = body.password || ''
+    if (!name || !email || !phone || !password) { json({ error: 'Preencha todos os campos' }, 400); return }
+    if (password.length < 6) { json({ error: 'Senha mínima 6 caracteres' }, 400); return }
+    const existing = await db.getUserByEmail(email)
+    if (existing) { json({ error: 'E-mail já cadastrado' }, 409); return }
+    const hash = await hashPassword(password)
+    await db.registerUser(name, email, phone, hash)
+    json({ ok: true }); return
+  }
 
   // Login page
   if (url === '/login' && method === 'GET') {
@@ -1940,10 +2127,17 @@ const server = http.createServer(async (req, res) => {
   if (!authUser) {
     res.writeHead(302, { 'Location': '/login' }); res.end(); return
   }
+  const trialExpired = authUser.trial_ends_at && new Date(authUser.trial_ends_at) < new Date()
+  if (trialExpired && authUser.role !== 'admin') {
+    if (url.startsWith('/api/')) { json({ error: 'Período de trial encerrado' }, 403); return }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>ZapVibe</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-950 text-white min-h-screen flex items-center justify-center"><div class="text-center max-w-sm mx-auto px-4"><div class="text-5xl mb-4">⏰</div><h1 class="text-xl font-bold mb-2">Trial encerrado</h1><p class="text-gray-400 mb-6">Seu período de teste expirou. Entre em contato para continuar usando.</p><a href="http://wa.link/k3gl1y" target="_blank" class="inline-block px-5 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl text-sm mb-3">💬 Falar com suporte</a><br><form method="POST" action="/logout"><button class="text-xs text-gray-500 hover:text-gray-300 mt-3">Sair</button></form></div></body></html>`)
+    return
+  }
   if (authUser.status !== 'active' && authUser.role !== 'admin') {
     if (url.startsWith('/api/')) { json({ error: 'Acesso pendente de aprovação' }, 403); return }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>ZapVibe</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-950 text-white min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-5xl mb-4">⏳</div><h1 class="text-xl font-bold mb-2">Aguardando aprovação</h1><p class="text-gray-400 mb-6">Seu acesso está sendo analisado pelo administrador.</p><form method="POST" action="/logout"><button class="px-4 py-2 bg-gray-800 rounded-xl text-sm hover:bg-gray-700">Sair</button></form></div></body></html>`)
+    res.end(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>ZapVibe</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-950 text-white min-h-screen flex items-center justify-center"><div class="text-center max-w-sm mx-auto px-4"><div class="text-5xl mb-4">⏳</div><h1 class="text-xl font-bold mb-2">Aguardando aprovação</h1><p class="text-gray-400 mb-2">Seu cadastro está sendo analisado.</p><p class="text-gray-500 text-sm mb-6">Assim que liberado você receberá acesso.</p><a href="http://wa.link/k3gl1y" target="_blank" class="inline-block px-5 py-2.5 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl text-sm mb-3">💬 Falar com suporte</a><br><form method="POST" action="/logout"><button class="text-xs text-gray-500 hover:text-gray-300 mt-3">Sair</button></form></div></body></html>`)
     return
   }
 
@@ -2183,7 +2377,12 @@ const server = http.createServer(async (req, res) => {
     const result = await db.upsertUser(email, hash, body.role || 'user', body.status || 'pending', null)
     const newUser = await db.getUserById(result.id)
     const instanceName = 'zv' + newUser.id
-    await db.updateUser(newUser.id, { instance_name: instanceName })
+    const trialUpdates = { instance_name: instanceName }
+    if (body.trial_days) {
+      const d = new Date(); d.setDate(d.getDate() + parseInt(body.trial_days))
+      trialUpdates.trial_ends_at = d.toISOString()
+    }
+    await db.updateUser(newUser.id, trialUpdates)
     json({ ok: true, id: newUser.id, email, instanceName }); return
   }
 
@@ -2194,6 +2393,15 @@ const server = http.createServer(async (req, res) => {
     if (body.status !== undefined) updates.status = body.status
     if (body.role !== undefined) updates.role = body.role
     if (body.password) updates.password_hash = await hashPassword(body.password)
+    if (body.trial_days !== undefined) {
+      if (body.trial_days === 0 || body.trial_days === null) {
+        updates.trial_ends_at = null
+      } else {
+        const d = new Date()
+        d.setDate(d.getDate() + parseInt(body.trial_days))
+        updates.trial_ends_at = d.toISOString()
+      }
+    }
     await db.updateUser(id, updates)
     if (body.status === 'active') {
       const u = await db.getUserById(id)
