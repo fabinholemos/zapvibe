@@ -96,7 +96,7 @@ document.getElementById('form').onsubmit = async e => {
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('pass').value })
   })
-  if (res.ok) { window.location.href = '/' }
+  if (res.ok) { window.location.href = '/app' }
   else {
     const d = await res.json()
     err.textContent = d.error || 'Erro ao entrar'
@@ -119,41 +119,41 @@ Estou entrando em contato para apresentar o ZapVibe, nossa solucao de comunicaca
 
 Posso te mostrar como funciona em poucos minutos?`
 
-const campaign = { running: false, stop: false, total: 0, sent: 0, failed: 0, log: [], results: [] }
-let currentMedia = null // { base64, mimetype, filename, mediatype }
+const campaigns = new Map() // userId → campaign state
+const mediaStore = new Map() // userId → currentMedia
 const replyTracker = new Map() // phone → timestamp (anti-loop)
-const REPLY_COOLDOWN = 5 * 60 * 1000 // 5 min entre respostas pra mesma pessoa
+const REPLY_COOLDOWN = 5 * 60 * 1000
+
+function getCampaign(userId) {
+  if (!campaigns.has(userId)) campaigns.set(userId, { running: false, stop: false, total: 0, sent: 0, failed: 0, log: [], results: [] })
+  return campaigns.get(userId)
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-// Resolve @lid JID → real phone JID pra envio
-// 1) cache db  2) nome no CSV  3) contatos da Evolution API  4) tenta @lid direto
-async function resolveJidForSending(jid, pushName) {
+async function resolveJidForSending(jid, pushName, userId, instanceName) {
   if (!jid.endsWith('@lid')) return jid
   const lidKey = jid.replace(/@.+/, '')
 
-  // 1. Cache
-  const cached = await db.getLidEntry(lidKey)
+  const cached = await db.getLidEntry(lidKey, userId)
   if (cached) { console.log('[LID] cache:', cached); return cached }
 
-  // 2. Nome no CSV
   if (pushName) {
     const words = pushName.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-    const contacts = await db.getContacts()
+    const contacts = await db.getContacts(userId)
     const match = contacts.find(c =>
       words.length && words.every(w => (c.nome || '').toLowerCase().includes(w))
     )
     if (match) {
       const sendJid = formatPhone(match.telefone) + '@s.whatsapp.net'
-      await db.saveLidEntry(lidKey, sendJid)
+      await db.saveLidEntry(lidKey, sendJid, userId)
       console.log('[LID] resolvido por nome CSV:', sendJid)
       return sendJid
     }
   }
 
-  // 3. Contatos da Evolution API
   try {
-    const evoContacts = await fetchApi(`/contact/findContacts/${INSTANCE}`, 'GET')
+    const evoContacts = await fetchApi(`/contact/findContacts/${instanceName}`, 'GET')
     if (Array.isArray(evoContacts)) {
       const firstName = (pushName || '').toLowerCase().split(' ')[0]
       const match = evoContacts.find(c =>
@@ -161,7 +161,7 @@ async function resolveJidForSending(jid, pushName) {
         (c.id || '').includes('@s.whatsapp.net')
       )
       if (match?.id) {
-        await db.saveLidEntry(lidKey, match.id)
+        await db.saveLidEntry(lidKey, match.id, userId)
         console.log('[LID] resolvido por contatos Evolution:', match.id)
         return match.id
       }
@@ -172,17 +172,26 @@ async function resolveJidForSending(jid, pushName) {
   return jid
 }
 
-async function configureWebhook() {
+async function configureWebhookForInstance(instanceName) {
   const baseUrl = process.env.WEBHOOK_BASE_URL || `http://host.docker.internal:${PORT}`
   try {
-    await fetchApi(`/webhook/set/${INSTANCE}`, 'POST', {
+    await fetchApi(`/webhook/set/${instanceName}`, 'POST', {
       url: `${baseUrl}/webhook`,
       webhookByEvents: false,
       events: ['MESSAGES_UPSERT']
     })
-    console.log('✔ Webhook configurado')
+    console.log(`✔ Webhook configurado para ${instanceName}`)
   } catch (e) {
-    console.log('⚠ Webhook não configurado (Evolution API ainda iniciando?)')
+    console.log(`⚠ Webhook não configurado para ${instanceName}`)
+  }
+}
+
+async function configureWebhook() {
+  const users = await db.getAllUsers().catch(() => [])
+  for (const u of users) {
+    if (u.instance_name && u.status === 'active') {
+      await configureWebhookForInstance(u.instance_name).catch(() => {})
+    }
   }
 }
 
@@ -196,27 +205,29 @@ async function processWebhook(data) {
   const jid = msg.key?.remoteJid || ''
   if (!jid || jid.endsWith('@g.us')) { console.log('[Webhook] ignorado: grupo ou sem jid'); return }
 
+  const instanceName = data.instance || INSTANCE
+  const user = await db.getUserByInstance(instanceName).catch(() => null)
+  if (!user) { console.log('[Webhook] instância sem usuário:', instanceName); return }
+  const userId = user.id
+
   const pushName = msg.pushName || ''
-  // Resolve @lid → JID real utilizável pra envio
-  const sendTo = await resolveJidForSending(jid, pushName)
-  const phone = sendTo.replace(/@.+/, '') // número limpo pra lookup
+  const sendTo = await resolveJidForSending(jid, pushName, userId, instanceName)
+  const phone = sendTo.replace(/@.+/, '')
 
   const text = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').toLowerCase().trim()
   console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
 
-  // Anti-loop
   const lastReply = replyTracker.get(phone)
   if (lastReply && Date.now() - lastReply < REPLY_COOLDOWN) return
 
-  // Descobre qual template foi enviado pra esse número
-  const logs = await db.getCampaignLog()
+  const logs = await db.getCampaignLog(userId)
   const phoneLog = logs.slice().reverse().find(l => l.phones.includes(phone))
   const senderTemplateId = phoneLog?.templateId || null
 
-  const rules = (await db.getAutoreplies()).filter(r => {
+  const rules = (await db.getAutoreplies(userId)).filter(r => {
     if (!r.active) return false
-    if (!r.templateId) return true // regra global
-    if (senderTemplateId === null) return true // sender não está em nenhum log → aplica tudo
+    if (!r.templateId) return true
+    if (senderTemplateId === null) return true
     return r.templateId === senderTemplateId
   })
   let matched = null
@@ -235,8 +246,7 @@ async function processWebhook(data) {
   replyTracker.set(phone, Date.now())
   await sleep(matched.delay || 1500)
 
-  // Substitui {nome}/{empresa}/{extra} buscando contato pelo número
-  const allContacts = await db.getContacts()
+  const allContacts = await db.getContacts(userId)
   const contact = allContacts.find(c => {
     const n = c.telefone.replace(/\D/g, '')
     return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
@@ -250,9 +260,9 @@ async function processWebhook(data) {
       mimetype: matched.mediaMimetype,
       filename: matched.mediaFilename || 'arquivo',
       mediatype: detectMediatype(matched.mediaMimetype)
-    }).catch(e => ({ error: e.message }))
+    }, instanceName).catch(e => ({ error: e.message }))
   } else {
-    replyResult = await sendWhatsapp(sendTo, replyText).catch(e => ({ error: e.message }))
+    replyResult = await sendWhatsapp(sendTo, replyText, instanceName).catch(e => ({ error: e.message }))
   }
 
   console.log(`[Auto-reply] → ${sendTo} (regra: ${matched.name}) | API:`, JSON.stringify(replyResult))
@@ -296,18 +306,18 @@ function fetchApi(urlPath, method, body) {
   })
 }
 
-async function sendWhatsapp(phone, text) {
-  return fetchApi(`/message/sendText/${INSTANCE}`, 'POST', { number: formatPhone(phone), textMessage: { text } })
+async function sendWhatsapp(phone, text, instanceName) {
+  return fetchApi(`/message/sendText/${instanceName}`, 'POST', { number: formatPhone(phone), textMessage: { text } })
 }
 
-async function sendWhatsappMedia(phone, caption, media) {
+async function sendWhatsappMedia(phone, caption, media, instanceName) {
   const number = formatPhone(phone)
   if (media.mediatype === 'audio') {
-    return fetchApi(`/message/sendWhatsAppAudio/${INSTANCE}`, 'POST', {
+    return fetchApi(`/message/sendWhatsAppAudio/${instanceName}`, 'POST', {
       number, audioMessage: { audio: media.base64 }
     })
   }
-  return fetchApi(`/message/sendMedia/${INSTANCE}`, 'POST', {
+  return fetchApi(`/message/sendMedia/${instanceName}`, 'POST', {
     number,
     mediaMessage: {
       mediatype: media.mediatype,
@@ -342,53 +352,54 @@ async function personalizeWithAI(template, contact) {
   } catch { return applyTemplate(template, contact) }
 }
 
-async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI, media, templateId, templateName) {
-  campaign.running = true
-  campaign.stop = false
-  campaign.total = Math.min(contacts.length, limit)
-  campaign.sent = 0
-  campaign.failed = 0
-  campaign.log = []
-  campaign.results = []
+async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI, media, templateId, templateName, userId, instanceName) {
+  const c_ = getCampaign(userId)
+  c_.running = true
+  c_.stop = false
+  c_.total = Math.min(contacts.length, limit)
+  c_.sent = 0
+  c_.failed = 0
+  c_.log = []
+  c_.results = []
   const slice = contacts.slice(0, limit)
   const sentPhones = []
   for (let i = 0; i < slice.length; i++) {
-    if (campaign.stop) { campaign.log.push({ t: 'warn', m: 'Campanha interrompida pelo usuário.' }); break }
+    if (c_.stop) { c_.log.push({ t: 'warn', m: 'Campanha interrompida pelo usuário.' }); break }
     const c = slice[i]
-    campaign.log.push({ t: 'info', m: `[${i+1}/${slice.length}] Enviando para ${c.nome}...` })
+    c_.log.push({ t: 'info', m: `[${i+1}/${slice.length}] Enviando para ${c.nome}...` })
     try {
       const msg = useAI ? await personalizeWithAI(template, c) : applyTemplate(template, c)
-      if (media) await sendWhatsappMedia(c.telefone, msg, media)
-      else await sendWhatsapp(c.telefone, msg)
-      campaign.sent++
+      if (media) await sendWhatsappMedia(c.telefone, msg, media, instanceName)
+      else await sendWhatsapp(c.telefone, msg, instanceName)
+      c_.sent++
       sentPhones.push(formatPhone(c.telefone))
-      campaign.results.push({ ...c, status: 'enviado', ts: new Date().toLocaleTimeString('pt-BR') })
-      campaign.log.push({ t: 'ok', m: `✔ ${c.nome} (${c.telefone})` })
+      c_.results.push({ ...c, status: 'enviado', ts: new Date().toLocaleTimeString('pt-BR') })
+      c_.log.push({ t: 'ok', m: `✔ ${c.nome} (${c.telefone})` })
     } catch (err) {
-      campaign.failed++
-      campaign.results.push({ ...c, status: 'falhou', erro: err.message, ts: new Date().toLocaleTimeString('pt-BR') })
-      campaign.log.push({ t: 'err', m: `✘ ${c.nome}: ${err.message}` })
+      c_.failed++
+      c_.results.push({ ...c, status: 'falhou', erro: err.message, ts: new Date().toLocaleTimeString('pt-BR') })
+      c_.log.push({ t: 'err', m: `✘ ${c.nome}: ${err.message}` })
     }
-    if (i < slice.length - 1 && !campaign.stop) {
+    if (i < slice.length - 1 && !c_.stop) {
       const d = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
-      campaign.log.push({ t: 'info', m: `⏳ Aguardando ${(d/1000).toFixed(1)}s...` })
+      c_.log.push({ t: 'info', m: `⏳ Aguardando ${(d/1000).toFixed(1)}s...` })
       await sleep(d)
     }
   }
-  campaign.running = false
-  campaign.log.push({ t: 'ok', m: `Campanha finalizada. ${campaign.sent} enviadas, ${campaign.failed} falhas.` })
+  c_.running = false
+  c_.log.push({ t: 'ok', m: `Campanha finalizada. ${c_.sent} enviadas, ${c_.failed} falhas.` })
   if (sentPhones.length) {
-    const sentContacts = campaign.results.filter(r => r.status === 'enviado').map(r => ({ nome: r.nome, telefone: r.telefone }))
+    const sentContacts = c_.results.filter(r => r.status === 'enviado').map(r => ({ nome: r.nome, telefone: r.telefone }))
     await db.addCampaignLog({
       id: Date.now().toString(),
       templateId: templateId || null,
       templateName: templateName || 'Sem nome',
       phones: sentPhones,
       contacts: sentContacts,
-      sent: campaign.sent,
-      failed: campaign.failed,
+      sent: c_.sent,
+      failed: c_.failed,
       sentAt: new Date().toISOString()
-    })
+    }, userId)
   }
 }
 
@@ -405,7 +416,7 @@ function readBody(req) {
 
 // ── HTML ─────────────────────────────────────────────────────────────────────
 
-const HTML = `<!DOCTYPE html>
+function getAppHTML(email, isAdmin, userInstance) { return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -433,9 +444,12 @@ textarea{resize:vertical}
   <div class="flex items-center gap-3 mb-6">
     <div class="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center text-lg">⚡</div>
     <div><h1 class="text-lg font-bold">ZapVibe</h1><p class="text-xs text-gray-500">Disparador inteligente de WhatsApp</p></div>
-    <div class="ml-auto flex items-center gap-2">
+    <div class="ml-auto flex items-center gap-3">
       <span id="hd-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
       <span id="hd-txt" class="text-xs text-gray-400">—</span>
+      <span class="text-xs text-gray-500 hidden sm:block">${email}</span>
+      ${isAdmin ? `<a href="/admin" class="text-xs px-2.5 py-1 bg-violet-900/50 hover:bg-violet-800/60 border border-violet-700/50 text-violet-300 rounded-lg transition-colors">Admin</a>` : ''}
+      <form method="POST" action="/logout"><button class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors">Sair</button></form>
     </div>
   </div>
 
@@ -510,7 +524,7 @@ textarea{resize:vertical}
           <span id="c-state" class="text-lg font-semibold text-gray-300">Verificando...</span>
         </div>
         <p class="text-xs text-gray-500 mb-1">Instância</p>
-        <p class="text-sm font-mono text-violet-400 mb-4">${INSTANCE}</p>
+        <p class="text-sm font-mono text-violet-400 mb-4">${userInstance}</p>
         <div class="flex gap-2">
           <button onclick="doConnect()" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Conectar</button>
           <button onclick="doDisconnect()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-xl transition-colors">Desconectar</button>
@@ -1645,7 +1659,215 @@ checkStatus()
 setInterval(checkStatus, 8000)
 </script>
 </body>
+</html>` }
+
+// ── Landing page ──────────────────────────────────────────────────────────────
+
+const LANDING_HTML = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZapVibe — Disparador Inteligente de WhatsApp com IA</title>
+<meta name="description" content="Envie mensagens personalizadas no WhatsApp com inteligência artificial. Automatize sua comunicação, dispare campanhas e responda clientes automaticamente com ZapVibe.">
+<meta name="keywords" content="disparador whatsapp, whatsapp marketing, automação whatsapp, envio em massa whatsapp, bot whatsapp, mensagens automáticas whatsapp">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+*{font-family:'Inter',sans-serif}
+.gradient-text{background:linear-gradient(135deg,#7c3aed,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.card-hover{transition:all .2s;border:1px solid transparent}
+.card-hover:hover{border-color:rgb(124 58 237 / 0.4);transform:translateY(-2px)}
+</style>
+</head>
+<body class="bg-gray-950 text-white">
+
+<!-- Nav -->
+<nav class="border-b border-gray-800/50 sticky top-0 bg-gray-950/90 backdrop-blur z-50">
+  <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-base">⚡</div>
+      <span class="font-bold text-lg">ZapVibe</span>
+    </div>
+    <a href="/login" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Entrar</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="max-w-6xl mx-auto px-4 pt-20 pb-16 text-center">
+  <div class="inline-flex items-center gap-2 bg-violet-950/60 border border-violet-700/40 text-violet-300 text-xs font-medium px-3 py-1.5 rounded-full mb-6">
+    <span class="w-1.5 h-1.5 rounded-full bg-violet-400"></span>
+    Automatize seu WhatsApp com Inteligência Artificial
+  </div>
+  <h1 class="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-tight mb-6">
+    Dispare mensagens no<br><span class="gradient-text">WhatsApp com IA</span>
+  </h1>
+  <p class="text-gray-400 text-lg max-w-2xl mx-auto mb-10">
+    Envie campanhas personalizadas para centenas de contatos, responda automaticamente e acompanhe tudo em um painel simples. Sem complicação, sem risco de ban.
+  </p>
+  <div class="flex flex-col sm:flex-row gap-3 justify-center">
+    <a href="/login" class="px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Começar agora →</a>
+    <a href="#features" class="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl transition-colors text-base">Ver funcionalidades</a>
+  </div>
+</section>
+
+<!-- Features -->
+<section id="features" class="max-w-6xl mx-auto px-4 py-16">
+  <h2 class="text-2xl sm:text-3xl font-bold text-center mb-4">Tudo que você precisa para vender pelo WhatsApp</h2>
+  <p class="text-gray-400 text-center mb-12 max-w-xl mx-auto">Uma plataforma completa para escalar seu negócio com automação inteligente de mensagens.</p>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    ${[
+      ['📤','Disparos em massa','Envie mensagens para centenas de contatos com delay inteligente para evitar bloqueios. CSV em segundos.'],
+      ['🤖','IA na personalização','Cada mensagem reescrita pela IA para soar natural e pessoal. Mais abertura, mais respostas.'],
+      ['💬','Auto-respostas','Configure regras automáticas por palavras-chave. Atenda leads enquanto você dorme.'],
+      ['📋','Templates prontos','Crie e salve templates para diferentes campanhas. Reutilize com 1 clique.'],
+      ['📊','Histórico detalhado','Veja quem recebeu, quando e os resultados de cada campanha em tempo real.'],
+      ['🔗','Conecte seu celular','Use seu próprio número do WhatsApp. Sem precisar de número virtual ou aprovação.'],
+    ].map(([icon, title, desc]) => `
+    <div class="card-hover bg-gray-900 rounded-2xl p-5">
+      <div class="text-3xl mb-3">${icon}</div>
+      <h3 class="font-semibold text-base mb-2">${title}</h3>
+      <p class="text-sm text-gray-400 leading-relaxed">${desc}</p>
+    </div>`).join('')}
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="max-w-3xl mx-auto px-4 py-16 text-center">
+  <div class="bg-gradient-to-br from-violet-950/60 to-purple-950/60 border border-violet-800/40 rounded-3xl p-10">
+    <h2 class="text-2xl sm:text-3xl font-bold mb-4">Pronto para escalar suas vendas?</h2>
+    <p class="text-gray-400 mb-8">Solicite acesso e comece a usar ZapVibe hoje mesmo.</p>
+    <a href="/login" class="inline-block px-8 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Acessar plataforma →</a>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="border-t border-gray-800/50 py-8 text-center text-xs text-gray-600">
+  <p>© ${new Date().getFullYear()} ZapVibe. Todos os direitos reservados.</p>
+</footer>
+
+</body>
 </html>`
+
+// ── Admin panel ───────────────────────────────────────────────────────────────
+
+function getAdminHTML(email) { return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZapVibe — Admin</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{font-family:'Inter',sans-serif}</style>
+</head>
+<body class="bg-gray-950 text-white min-h-screen">
+<div class="max-w-5xl mx-auto px-4 py-8">
+
+  <!-- Header -->
+  <div class="flex items-center gap-3 mb-8">
+    <div class="w-9 h-9 rounded-xl bg-violet-600 flex items-center justify-center text-lg">⚡</div>
+    <div><h1 class="text-lg font-bold">ZapVibe</h1><p class="text-xs text-gray-500">Painel Admin</p></div>
+    <div class="ml-auto flex items-center gap-3">
+      <span class="text-xs text-gray-500">${email}</span>
+      <a href="/app" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg transition-colors">Dashboard</a>
+      <form method="POST" action="/logout"><button class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded-lg transition-colors">Sair</button></form>
+    </div>
+  </div>
+
+  <!-- Users table -->
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+    <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
+      <h2 class="font-semibold">Usuários</h2>
+      <button onclick="openAddUser()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">+ Novo usuário</button>
+    </div>
+    <div id="users-list" class="divide-y divide-gray-800">
+      <p class="text-center py-8 text-gray-600 text-sm">Carregando...</p>
+    </div>
+  </div>
+</div>
+
+<!-- Add user modal -->
+<div id="modal-add" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 w-full max-w-sm">
+    <h3 class="font-semibold mb-4">Novo usuário</h3>
+    <div id="add-err" class="hidden bg-red-950 border border-red-800 text-red-300 text-sm px-4 py-2 rounded-xl mb-3"></div>
+    <form id="form-add" class="space-y-3">
+      <div><label class="block text-xs text-gray-400 mb-1">E-mail</label>
+        <input id="add-email" type="email" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500" placeholder="usuario@email.com"></div>
+      <div><label class="block text-xs text-gray-400 mb-1">Senha inicial</label>
+        <input id="add-pass" type="text" required class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500" placeholder="Senha temporária"></div>
+      <div><label class="block text-xs text-gray-400 mb-1">Status</label>
+        <select id="add-status" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500">
+          <option value="active">Ativo</option>
+          <option value="pending">Pendente</option>
+        </select></div>
+      <div class="flex gap-2 pt-1">
+        <button type="button" onclick="closeAddUser()" class="flex-1 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-xl text-sm">Cancelar</button>
+        <button type="submit" class="flex-1 py-2.5 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium">Criar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+
+async function loadUsers() {
+  const res = await fetch('/api/admin/users')
+  const users = await res.json()
+  const el = document.getElementById('users-list')
+  if (!users.length) { el.innerHTML = '<p class="text-center py-8 text-gray-600 text-sm">Nenhum usuário.</p>'; return }
+  el.innerHTML = users.map(u => \`
+    <div class="px-5 py-3.5 flex items-center gap-3 hover:bg-gray-800/40 transition-colors">
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-medium truncate">\${esc(u.email)}</p>
+        <p class="text-xs text-gray-500">Instância: \${esc(u.instance_name||'—')} · Criado: \${new Date(u.created_at).toLocaleDateString('pt-BR')}</p>
+      </div>
+      <span class="text-xs font-medium px-2 py-0.5 rounded-full \${u.role==='admin'?'bg-violet-900/60 text-violet-300':'bg-gray-800 text-gray-400'}">\${u.role}</span>
+      <div class="flex items-center gap-1">
+        <select onchange="setStatus(\${u.id},this.value)" class="text-xs bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 focus:outline-none">
+          \${['pending','active','blocked'].map(s=>\`<option value="\${s}" \${u.status===s?'selected':''}>\${s==='pending'?'Pendente':s==='active'?'Ativo':'Bloqueado'}</option>\`).join('')}
+        </select>
+        \${u.role !== 'admin' ? \`<button onclick="deleteUser(\${u.id},'\${esc(u.email)}')" class="text-xs px-2 py-1 bg-red-950/60 hover:bg-red-900/60 text-red-400 rounded-lg transition-colors">✕</button>\` : ''}
+      </div>
+    </div>\`).join('')
+}
+
+async function setStatus(id, status) {
+  await fetch(\`/api/admin/users/\${id}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status }) })
+  loadUsers()
+}
+
+async function deleteUser(id, email) {
+  if (!confirm('Excluir ' + email + '?')) return
+  await fetch(\`/api/admin/users/\${id}\`, { method:'DELETE' })
+  loadUsers()
+}
+
+function openAddUser() { document.getElementById('modal-add').classList.remove('hidden') }
+function closeAddUser() { document.getElementById('modal-add').classList.add('hidden') }
+
+document.getElementById('form-add').onsubmit = async e => {
+  e.preventDefault()
+  const btn = e.target.querySelector('[type=submit]')
+  btn.disabled = true
+  const errEl = document.getElementById('add-err')
+  errEl.classList.add('hidden')
+  const res = await fetch('/api/admin/users', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email: document.getElementById('add-email').value, password: document.getElementById('add-pass').value, status: document.getElementById('add-status').value })
+  })
+  const data = await res.json()
+  if (res.ok) { closeAddUser(); loadUsers(); e.target.reset() }
+  else { errEl.textContent = data.error || 'Erro ao criar usuário'; errEl.classList.remove('hidden') }
+  btn.disabled = false
+}
+
+loadUsers()
+</script>
+</body>
+</html>` }
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
@@ -1691,35 +1913,70 @@ const server = http.createServer(async (req, res) => {
     res.end(); return
   }
 
-  // Auth guard — todas as rotas abaixo exigem sessão válida
+  // Webhook — public, no auth (Evolution API calls this)
+  if (url === '/webhook' && method === 'POST') {
+    const body = await readBody(req)
+    res.writeHead(200); res.end('ok')
+    processWebhook(body).catch(console.error)
+    return
+  }
+
+  // Public landing page
+  if (url === '/' || url === '/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(LANDING_HTML)
+    return
+  }
+
+  // Auth guard — rotas abaixo exigem sessão válida
   const session = await getAuthSession(req)
   if (!session) {
     if (url.startsWith('/api/')) { json({ error: 'Não autorizado' }, 401); return }
     res.writeHead(302, { 'Location': '/login' }); res.end(); return
   }
 
-  if (url === '/' || url === '/index.html') {
+  const authUser = await db.getUserByEmail(session.email)
+  if (!authUser) {
+    res.writeHead(302, { 'Location': '/login' }); res.end(); return
+  }
+  if (authUser.status !== 'active' && authUser.role !== 'admin') {
+    if (url.startsWith('/api/')) { json({ error: 'Acesso pendente de aprovação' }, 403); return }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-    res.end(HTML)
+    res.end(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>ZapVibe</title><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-gray-950 text-white min-h-screen flex items-center justify-center"><div class="text-center"><div class="text-5xl mb-4">⏳</div><h1 class="text-xl font-bold mb-2">Aguardando aprovação</h1><p class="text-gray-400 mb-6">Seu acesso está sendo analisado pelo administrador.</p><form method="POST" action="/logout"><button class="px-4 py-2 bg-gray-800 rounded-xl text-sm hover:bg-gray-700">Sair</button></form></div></body></html>`)
     return
+  }
+
+  const userId = authUser.id
+  const userInstance = authUser.instance_name || INSTANCE
+  const isAdmin = authUser.role === 'admin'
+
+  // Admin panel
+  if (url === '/admin' || url === '/admin/') {
+    if (!isAdmin) { res.writeHead(302, { 'Location': '/app' }); res.end(); return }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(getAdminHTML(authUser.email)); return
+  }
+
+  if (url === '/app' || url === '/app/') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(getAppHTML(authUser.email, isAdmin, userInstance)); return
   }
 
   // Connection
   if (url === '/api/status') {
-    try { json(await fetchApi(`/instance/connectionState/${INSTANCE}`, 'GET')) }
+    try { json(await fetchApi(`/instance/connectionState/${userInstance}`, 'GET')) }
     catch (e) { json({ error: e.message }, 500) }
     return
   }
 
   if (url === '/api/connect' && method === 'POST') {
     try {
-      const created = await fetchApi('/instance/create', 'POST', { instanceName: INSTANCE, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(e => ({ error: e.message }))
+      const created = await fetchApi('/instance/create', 'POST', { instanceName: userInstance, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(e => ({ error: e.message }))
       console.log('[Connect] create:', JSON.stringify(created).slice(0, 300))
-      // QR code gerado async — tenta até 6x com 3s de intervalo
       let result = {}
       for (let i = 0; i < 6; i++) {
         await sleep(3000)
-        result = await fetchApi(`/instance/connect/${INSTANCE}`, 'GET').catch(() => ({}))
+        result = await fetchApi(`/instance/connect/${userInstance}`, 'GET').catch(() => ({}))
         console.log(`[Connect] tentativa ${i+1}:`, JSON.stringify(result).slice(0, 200))
         if (result.qrcode?.base64 || result.base64) break
       }
@@ -1729,19 +1986,19 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url === '/api/disconnect' && method === 'POST') {
-    try { json(await fetchApi(`/instance/logout/${INSTANCE}`, 'DELETE')) }
+    try { json(await fetchApi(`/instance/logout/${userInstance}`, 'DELETE')) }
     catch (e) { json({ error: e.message }, 500) }
     return
   }
 
   // Contacts
   if (url === '/api/contacts' && method === 'GET') {
-    json(await db.getContacts()); return
+    json(await db.getContacts(userId)); return
   }
 
   if (url === '/api/contacts' && method === 'PUT') {
     const body = await readBody(req)
-    await db.saveContacts(Array.isArray(body) ? body : [])
+    await db.saveContacts(Array.isArray(body) ? body : [], userId)
     json({ ok: true }); return
   }
 
@@ -1755,25 +2012,17 @@ const server = http.createServer(async (req, res) => {
         if (!r.nome?.trim() || p.length < 10 || p.length > 13) { invalid.push(r); continue }
         valid.push(r)
       }
-      const existing = await db.getContacts()
+      const existing = await db.getContacts(userId)
       const merged = [...existing, ...valid]
-      await db.saveContacts(merged)
+      await db.saveContacts(merged, userId)
       json({ ok: true, contacts: merged, imported: valid.length, invalid: invalid.length })
     } catch (e) { json({ error: e.message }, 400) }
     return
   }
 
-  // Webhook
-  if (url === '/webhook' && method === 'POST') {
-    const body = await readBody(req)
-    res.writeHead(200); res.end('ok')
-    processWebhook(body).catch(console.error)
-    return
-  }
-
   // Auto-respostas
   if (url === '/api/autoreplies' && method === 'GET') {
-    json(await db.getAutoreplies()); return
+    json(await db.getAutoreplies(userId)); return
   }
 
   if (url === '/api/autoreplies' && method === 'POST') {
@@ -1792,20 +2041,20 @@ const server = http.createServer(async (req, res) => {
       mediaFilename: body.mediaFilename || null,
       createdAt: new Date().toISOString()
     }
-    await db.addAutoreply(rule)
+    await db.addAutoreply(rule, userId)
     json(rule); return
   }
 
   if (url.startsWith('/api/autoreplies/') && method === 'PUT') {
     const id = url.split('/')[3]
     const body = await readBody(req)
-    await db.updateAutoreply(id, body)
+    await db.updateAutoreply(id, body, userId)
     json({ ok: true }); return
   }
 
   if (url.startsWith('/api/autoreplies/') && method === 'DELETE') {
     const id = url.split('/')[3]
-    await db.deleteAutoreply(id)
+    await db.deleteAutoreply(id, userId)
     json({ ok: true }); return
   }
 
@@ -1813,100 +2062,148 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/media/upload' && method === 'POST') {
     const body = await readBody(req)
     if (!body.base64 || !body.mimetype || !body.filename) { json({ error: 'missing fields' }, 400); return }
-    currentMedia = { base64: body.base64, mimetype: body.mimetype, filename: body.filename, mediatype: detectMediatype(body.mimetype) }
-    json({ ok: true, mediatype: currentMedia.mediatype, filename: currentMedia.filename }); return
+    mediaStore.set(userId, { base64: body.base64, mimetype: body.mimetype, filename: body.filename, mediatype: detectMediatype(body.mimetype) })
+    const m = mediaStore.get(userId)
+    json({ ok: true, mediatype: m.mediatype, filename: m.filename }); return
   }
 
   if (url === '/api/media' && method === 'DELETE') {
-    currentMedia = null; json({ ok: true }); return
+    mediaStore.delete(userId); json({ ok: true }); return
   }
 
   if (url === '/api/media' && method === 'GET') {
-    json(currentMedia ? { mediatype: currentMedia.mediatype, filename: currentMedia.filename, mimetype: currentMedia.mimetype } : null); return
+    const m = mediaStore.get(userId)
+    json(m ? { mediatype: m.mediatype, filename: m.filename, mimetype: m.mimetype } : null); return
   }
 
   // Template (rascunho atual)
   if (url === '/api/template' && method === 'GET') {
-    const content = await db.getDraft()
+    const content = await db.getDraft(userId)
     json({ template: content || DEFAULT_TEMPLATE }); return
   }
 
   if (url === '/api/template' && method === 'PUT') {
     const body = await readBody(req)
-    await db.saveDraft(body.template || '')
+    await db.saveDraft(body.template || '', userId)
     json({ ok: true }); return
   }
 
   // Templates salvos
   if (url === '/api/templates' && method === 'GET') {
-    json(await db.getTemplates()); return
+    json(await db.getTemplates(userId)); return
   }
 
   if (url === '/api/templates' && method === 'POST') {
     const body = await readBody(req)
     if (!body.name?.trim() || !body.content?.trim()) { json({ error: 'name e content obrigatórios' }, 400); return }
     const tpl = { id: Date.now().toString(), name: body.name.trim(), content: body.content.trim(), createdAt: new Date().toISOString() }
-    json(await db.addTemplate(tpl)); return
+    json(await db.addTemplate(tpl, userId)); return
   }
 
   if (url.startsWith('/api/templates/') && method === 'DELETE') {
     const id = url.split('/')[3]
-    await db.deleteTemplate(id)
+    await db.deleteTemplate(id, userId)
     json({ ok: true }); return
   }
 
   if (url.startsWith('/api/templates/') && method === 'PUT') {
     const id = url.split('/')[3]
     const body = await readBody(req)
-    await db.updateTemplate(id, { name: body.name?.trim(), content: body.content?.trim() })
+    await db.updateTemplate(id, { name: body.name?.trim(), content: body.content?.trim() }, userId)
     json({ ok: true }); return
   }
 
   // Campaign
   if (url === '/api/campaign/start' && method === 'POST') {
-    if (campaign.running) { json({ error: 'Campanha já em andamento' }, 400); return }
+    const c_ = getCampaign(userId)
+    if (c_.running) { json({ error: 'Campanha já em andamento' }, 400); return }
     const body = await readBody(req)
-    const contacts = Array.isArray(body.contacts) && body.contacts.length ? body.contacts : readContacts()
-    runCampaign(contacts, body.template, body.delayMin, body.delayMax, body.limit, body.useAI, body.useMedia ? currentMedia : null, body.templateId, body.templateName)
+    const contacts = Array.isArray(body.contacts) && body.contacts.length ? body.contacts : await db.getContacts(userId)
+    runCampaign(contacts, body.template, body.delayMin, body.delayMax, body.limit, body.useAI, body.useMedia ? mediaStore.get(userId) : null, body.templateId, body.templateName, userId, userInstance)
     json({ ok: true }); return
   }
 
   if (url === '/api/campaign/stop' && method === 'POST') {
-    campaign.stop = true; json({ ok: true }); return
+    getCampaign(userId).stop = true; json({ ok: true }); return
   }
 
   if (url === '/api/campaign/progress') {
-    json({ running: campaign.running, total: campaign.total, sent: campaign.sent, failed: campaign.failed, log: campaign.log, results: campaign.results })
+    const c_ = getCampaign(userId)
+    json({ running: c_.running, total: c_.total, sent: c_.sent, failed: c_.failed, log: c_.log, results: c_.results })
     return
   }
 
   // Campaign history
   if (url === '/api/campaign/history' && method === 'GET') {
-    json((await db.getCampaignLog()).slice().reverse()); return
+    json((await db.getCampaignLog(userId)).slice().reverse()); return
   }
 
   // Groups
   if (url === '/api/groups' && method === 'GET') {
-    json(await db.getGroups()); return
+    json(await db.getGroups(userId)); return
   }
 
   if (url === '/api/groups' && method === 'POST') {
     const body = await readBody(req)
     if (!body.name?.trim()) { json({ error: 'name obrigatório' }, 400); return }
     const group = { id: Date.now().toString(), name: body.name.trim(), phones: body.phones || [], createdAt: new Date().toISOString() }
-    json(await db.addGroup(group)); return
+    json(await db.addGroup(group, userId)); return
   }
 
   if (url.startsWith('/api/groups/') && method === 'PUT') {
     const id = url.split('/')[3]
     const body = await readBody(req)
-    await db.updateGroup(id, body)
+    await db.updateGroup(id, body, userId)
     json({ ok: true }); return
   }
 
   if (url.startsWith('/api/groups/') && method === 'DELETE') {
     const id = url.split('/')[3]
-    await db.deleteGroup(id)
+    await db.deleteGroup(id, userId)
+    json({ ok: true }); return
+  }
+
+  // Admin routes
+  if (url.startsWith('/api/admin/') && !isAdmin) {
+    json({ error: 'Acesso negado' }, 403); return
+  }
+
+  if (url === '/api/admin/users' && method === 'GET') {
+    json(await db.getAllUsers()); return
+  }
+
+  if (url === '/api/admin/users' && method === 'POST') {
+    const body = await readBody(req)
+    const email = (body.email || '').toLowerCase().trim()
+    if (!email || !body.password) { json({ error: 'email e password obrigatórios' }, 400); return }
+    const existing = await db.getUserByEmail(email)
+    if (existing) { json({ error: 'E-mail já cadastrado' }, 409); return }
+    const hash = await hashPassword(body.password)
+    const result = await db.upsertUser(email, hash, body.role || 'user', body.status || 'pending', null)
+    const newUser = await db.getUserById(result.id)
+    const instanceName = 'zv' + newUser.id
+    await db.updateUser(newUser.id, { instance_name: instanceName })
+    json({ ok: true, id: newUser.id, email, instanceName }); return
+  }
+
+  if (url.startsWith('/api/admin/users/') && method === 'PUT') {
+    const id = parseInt(url.split('/')[4])
+    const body = await readBody(req)
+    const updates = {}
+    if (body.status !== undefined) updates.status = body.status
+    if (body.role !== undefined) updates.role = body.role
+    if (body.password) updates.password_hash = await hashPassword(body.password)
+    await db.updateUser(id, updates)
+    if (body.status === 'active') {
+      const u = await db.getUserById(id)
+      if (u && u.instance_name) configureWebhookForInstance(u.instance_name).catch(() => {})
+    }
+    json({ ok: true }); return
+  }
+
+  if (url.startsWith('/api/admin/users/') && method === 'DELETE') {
+    const id = parseInt(url.split('/')[4])
+    await db.deleteUser(id)
     json({ ok: true }); return
   }
 
@@ -1921,7 +2218,14 @@ async function seedAdmin() {
     return
   }
   const hash = await hashPassword(password)
-  await db.upsertUser(email, hash)
+  const result = await db.upsertUser(email, hash, 'admin', 'active', null)
+  if (result?.id) {
+    const u = await db.getUserById(result.id)
+    if (!u?.instance_name) {
+      await db.updateUser(result.id, { instance_name: 'zv' + result.id }).catch(() => {})
+    }
+    await db.updateUser(result.id, { status: 'active' }).catch(() => {})
+  }
   console.log(`✔ Admin configurado: ${email}`)
 }
 
