@@ -96,7 +96,7 @@ document.getElementById('form').onsubmit = async e => {
     headers: {'Content-Type':'application/json'},
     body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('pass').value })
   })
-  if (res.ok) { window.location.href = '/app' }
+  if (res.ok) { const p = new URLSearchParams(location.search); window.location.href = p.get('next') || '/app' }
   else {
     const d = await res.json()
     err.textContent = d.error || 'Erro ao entrar'
@@ -1932,7 +1932,8 @@ const server = http.createServer(async (req, res) => {
   const session = await getAuthSession(req)
   if (!session) {
     if (url.startsWith('/api/')) { json({ error: 'Não autorizado' }, 401); return }
-    res.writeHead(302, { 'Location': '/login' }); res.end(); return
+    const next = encodeURIComponent(url)
+    res.writeHead(302, { 'Location': `/login?next=${next}` }); res.end(); return
   }
 
   const authUser = await db.getUserByEmail(session.email)

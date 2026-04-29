@@ -95,6 +95,23 @@ async function init() {
     ALTER TABLE lid_map ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE draft ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
   `).catch(() => {})
+
+  // Atribui dados órfãos (user_id NULL) ao primeiro admin
+  await pool.query(`
+    DO $$
+    DECLARE admin_id INTEGER;
+    BEGIN
+      SELECT id INTO admin_id FROM users WHERE role='admin' ORDER BY id LIMIT 1;
+      IF admin_id IS NOT NULL THEN
+        UPDATE contacts SET user_id=admin_id WHERE user_id IS NULL;
+        UPDATE templates SET user_id=admin_id WHERE user_id IS NULL;
+        UPDATE autoreplies SET user_id=admin_id WHERE user_id IS NULL;
+        UPDATE campaign_log SET user_id=admin_id WHERE user_id IS NULL;
+        UPDATE groups_table SET user_id=admin_id WHERE user_id IS NULL;
+        UPDATE lid_map SET user_id=admin_id WHERE user_id IS NULL;
+      END IF;
+    END $$;
+  `).catch(() => {})
 }
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
