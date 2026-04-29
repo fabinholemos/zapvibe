@@ -2235,7 +2235,9 @@ const server = http.createServer(async (req, res) => {
         valid.push({ ...r, telefone: tel })
       }
       const existing = await db.getContacts(userId)
-      const merged = [...existing, ...valid]
+      const existingMap = new Map(existing.map(c => [c.telefone, c]))
+      for (const c of valid) existingMap.set(c.telefone, c)
+      const merged = [...existingMap.values()]
       await db.saveContacts(merged, userId)
       const invalidSamples = invalid.slice(0, 3).map(r => JSON.stringify(r).slice(0, 60))
       json({ ok: true, contacts: merged, imported: valid.length, invalid: invalid.length, invalidSamples })
