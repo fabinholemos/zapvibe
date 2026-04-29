@@ -557,8 +557,11 @@ textarea{resize:vertical}
       Colunas aceitas no CSV: <span class="font-mono text-gray-300">nome, telefone, empresa, extra, vencimento</span>
     </div>
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
-      <div class="flex gap-2">
-        <input id="search" oninput="filterContacts()" placeholder="Buscar..." class="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm w-48 focus:outline-none focus:border-violet-500"/>
+      <div class="flex gap-2 flex-wrap">
+        <input id="search" oninput="filterContacts()" placeholder="Buscar por nome..." class="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm w-44 focus:outline-none focus:border-violet-500"/>
+        <select id="filter-group" onchange="filterContacts()" class="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500 text-gray-400">
+          <option value="">Todos os grupos</option>
+        </select>
         <label class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-xl cursor-pointer transition-colors">
           Importar CSV <input type="file" accept=".csv" onchange="importCSV(event)" class="hidden"/>
         </label>
@@ -977,14 +980,19 @@ async function loadContacts() {
 }
 
 function filterContacts() {
-  const q = document.getElementById('search').value.toLowerCase()
-  const grp = activeGroup ? (groups.find(g => g.id === activeGroup) || null) : null
+  const q = (document.getElementById('search')?.value || '').toLowerCase()
+  const gid = document.getElementById('filter-group')?.value || ''
+  const grpFilter = gid ? (groups.find(g => g.id === gid) || null) : null
+  const activeGrp = activeGroup ? (groups.find(g => g.id === activeGroup) || null) : null
   filtered = contacts.filter(c => {
-    if (grp && !grp.phones.includes(c.telefone.replace(/\D/g,''))) return false
-    return (c.nome||'').toLowerCase().includes(q) ||
+    const tel = c.telefone.replace(/\D/g,'')
+    if (activeGrp && !activeGrp.phones.includes(tel)) return false
+    if (grpFilter && !grpFilter.phones.includes(tel)) return false
+    return !q || (c.nome||'').toLowerCase().includes(q) ||
       (c.telefone||'').includes(q) ||
       (c.empresa||'').toLowerCase().includes(q)
   })
+  filtered.sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR'))
   renderContacts()
 }
 
@@ -1559,6 +1567,14 @@ async function checkWebhookStatus() {
 async function loadGroupsUI() {
   groups = await fetch('/api/groups').then(r => r.json())
   renderGroupChips()
+  // Atualiza select de filtro
+  const sel = document.getElementById('filter-group')
+  if (sel) {
+    const cur = sel.value
+    sel.innerHTML = '<option value="">Todos os grupos</option>'
+    groups.forEach(g => { const o = document.createElement('option'); o.value=g.id; o.textContent=g.name; sel.appendChild(o) })
+    if (cur) sel.value = cur
+  }
 }
 
 function renderGroupChips() {
