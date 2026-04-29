@@ -1,0 +1,204 @@
+[
+  {
+    "id": "1777245991307",
+    "templateId": "1777244577408",
+    "templateName": "zapflow",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-26T23:26:31.307Z"
+  },
+  {
+    "id": "1777247238041",
+    "templateId": "1777244577408",
+    "templateName": "zapflow",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-26T23:47:18.041Z"
+  },
+  {
+    "id": "1777308917966",
+    "templateId": "1777211367851",
+    "templateName": "Aprovaemfoco",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T16:55:17.967Z"
+  },
+  {
+    "id": "1777309270049",
+    "templateId": "1777211367851",
+    "templateName": "Aprovaemfoco",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:01:10.049Z"
+  },
+  {
+    "id": "1777309318806",
+    "templateId": "1777211367851",
+    "templateName": "Aprovaemfoco",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:01:58.806Z"
+  },
+  {
+    "id": "1777310736269",
+    "templateId": "1777211367851",
+    "templateName": "Aprovaemfoco",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:25:36.269Z"
+  },
+  {
+    "id": "1777310983321",
+    "templateId": "1777211367851",
+    "templateName": "Aprovaemfoco",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:29:43.321Z"
+  },
+  {
+    "id": "1777311339431",
+    "templateId": "1777211367851",
+    "templateName": "Aprovaemfoco",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:35:39.431Z"
+  },
+  {
+    "id": "1777311424275",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:37:04.275Z"
+  },
+  {
+    "id": "1777311482420",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:38:02.420Z"
+  },
+  {
+    "id": "1777311672547",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "5515981529841"
+    ],
+    "sentAt": "2026-04-27T17:41:12.547Z"
+  },
+  {
+    "id": "1777334191724",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "5515981529841"
+    ],
+    "contacts": [
+      {
+        "nome": "FABIO  LEMOS",
+        "telefone": "15981529841"
+      }
+    ],
+    "sent": 1,
+    "failed": 0,
+    "sentAt": "2026-04-27T23:56:31.724Z"
+  },
+  {
+    "id": "1777339248001",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "5514991169834",
+      "5527988785909"
+    ],
+    "contacts": [
+      {
+        "nome": "Katia Gonçalves",
+        "telefone": "14991169834"
+      },
+      {
+        "nome": "Marlene",
+        "telefone": "27988785909"
+      }
+    ],
+    "sent": 2,
+    "failed": 0,
+    "sentAt": "2026-04-28T01:20:48.001Z"
+  },
+  {
+    "id": "1777383670983",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "554789067745",
+      "5511940367373",
+      "558597744905",
+      "5519971606664",
+      "5511949856145"
+    ],
+    "contacts": [
+      {
+        "nome": "Luciane",
+        "telefone": "4789067745"
+      },
+      {
+        "nome": "Janaina",
+        "telefone": "11940367373"
+      },
+      {
+        "nome": "Debora rocha",
+        "telefone": "8597744905"
+      },
+      {
+        "nome": "Alessandra",
+        "telefone": "19971606664"
+      },
+      {
+        "nome": "Silmara",
+        "telefone": "11949856145"
+      }
+    ],
+    "sent": 5,
+    "failed": 0,
+    "sentAt": "2026-04-28T13:41:10.983Z"
+  },
+  {
+    "id": "1777395845999",
+    "templateId": "1777311013257",
+    "templateName": "aprova",
+    "phones": [
+      "553198152628",
+      "556285521012",
+      "5521996501080"
+    ],
+    "contacts": [
+      {
+        "nome": "Lucio",
+        "telefone": "3198152628"
+      },
+      {
+        "nome": "descomhecido2",
+        "telefone": "6285521012"
+      },
+      {
+        "nome": "desconhecido3",
+        "telefone": "21996501080"
+      }
+    ],
+    "sent": 3,
+    "failed": 0,
+    "sentAt": "2026-04-28T17:04:05.999Z"
+  }
+]

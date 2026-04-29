@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx claude plugin marketplace add JuliusBrussee/caveman 2>&1)",
+      "Bash(docker compose *)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }; Start-Sleep -Seconds 1; cd \"d:\\\\Negócios\\\\Sistemas\\\\Zapflow\\\\zapflow\"; node src/dashboard.js)",
+      "Bash(npm install *)",
+      "Bash(node --check src/dashboard.js)",
+      "Bash(node --check src/db.js)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git branch *)",
+      "Bash(git remote *)"
+    ]
+  }
+}

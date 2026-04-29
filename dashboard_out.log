@@ -1,0 +1,15 @@
+
+⚡ ZapFlow Dashboard → http://localhost:3000
+
+✔ Webhook configurado
+[Webhook] event: messages.upsert | normalizado: messages_upsert
+[Webhook] msg de 79517091672299@lid : entendi obrigada
+[Webhook] regras ativas: 1 | matched: nenhuma
+[Webhook] event: messages.upsert | normalizado: messages_upsert
+[Webhook] msg de 167516643029216@lid : sim
+[Webhook] regras ativas: 1 | matched: Marketing inicial
+[Auto-reply] → 167516643029216@lid (regra: Marketing inicial)
+[Webhook] event: messages.upsert | normalizado: messages_upsert
+[Webhook] ignorado: fromMe ou sem msg
+[Webhook] event: messages.upsert | normalizado: messages_upsert
+[Webhook] ignorado: fromMe ou sem msg
