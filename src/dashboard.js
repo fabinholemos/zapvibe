@@ -554,7 +554,7 @@ textarea{resize:vertical}
   <!-- ── TAB: Contatos ── -->
   <div id="p-contacts" class="hidden fade">
     <div class="bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-2.5 mb-3 text-xs text-gray-400">
-      📋 Colunas suportadas no CSV: <span class="font-mono text-gray-300">nome, telefone, empresa, extra, vencimento</span> — use <span class="font-mono text-green-400">{vencimento}</span> no template para personalizar datas (ex: IPTV, assinaturas)
+      Colunas aceitas no CSV: <span class="font-mono text-gray-300">nome, telefone, empresa, extra, vencimento</span>
     </div>
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div class="flex gap-2">
