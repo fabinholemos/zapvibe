@@ -2212,11 +2212,13 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/contacts/import' && method === 'POST') {
     const body = await readBody(req)
     try {
-      const records = parse(body.csv || '', { columns: true, skip_empty_lines: true, trim: true })
+      const csv = body.csv || ''
+      const delimiter = (csv.split('\n')[0] || '').includes(';') ? ';' : ','
+      const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, delimiter, relax_column_count: true })
       const valid = [], invalid = []
       for (const r of records) {
         const p = (r.telefone || '').replace(/\D/g, '')
-        if (!r.nome?.trim() || p.length < 10 || p.length > 13) { invalid.push(r); continue }
+        if (!r.nome?.trim() || p.length < 8 || p.length > 15) { invalid.push(r); continue }
         valid.push(r)
       }
       const existing = await db.getContacts(userId)
