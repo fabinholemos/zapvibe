@@ -1093,7 +1093,10 @@ function importCSV(e) {
     contacts = r.contacts || []
     filtered = [...contacts]
     renderContacts()
-    alert(\`Importados: \${r.imported} contatos (\${r.invalid} inválidos ignorados)\`)
+    let msg = \`Importados: \${r.imported} contatos\`
+    if (r.invalid > 0) msg += \`\n\${r.invalid} ignorados (sem nome ou telefone vazio)\`
+    if (r.invalidSamples?.length) msg += \`\nExemplos ignorados: \${r.invalidSamples.join(', ')}\`
+    alert(msg)
   }
   reader.readAsText(file)
   e.target.value = ''
@@ -2212,28 +2215,30 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/contacts/import' && method === 'POST') {
     const body = await readBody(req)
     try {
-      const csv = body.csv || ''
-      const delimiter = (csv.split('\n')[0] || '').includes(';') ? ';' : ','
-      const rawRecords = parse(csv, { columns: true, skip_empty_lines: true, trim: true, delimiter, relax_column_count: true })
-      // Normaliza chaves para minúsculas
+      const csv = (body.csv || '').replace(/^﻿/, '') // remove BOM do Excel
+      const firstLine = csv.split('\n')[0] || ''
+      const delimiter = firstLine.includes(';') ? ';' : ','
+      const rawRecords = parse(csv, { columns: true, skip_empty_lines: true, trim: true, delimiter, relax_column_count: true, bom: true })
+      // Normaliza chaves para minúsculas e remove espaços
       const records = rawRecords.map(r => {
         const n = {}
-        for (const k of Object.keys(r)) n[k.toLowerCase().trim()] = r[k]
+        for (const k of Object.keys(r)) n[k.toLowerCase().trim().replace(/\s+/g,'')] = r[k]
         return n
       })
       const valid = [], invalid = []
       for (const r of records) {
-        // Resolve notação científica do Excel (ex: 1,2E+10 ou 1.2E+10)
-        let tel = String(r.telefone || '').replace(',', '.')
+        // Resolve notação científica do Excel (1,2E+10 ou 1.2E+10)
+        let tel = String(r.telefone || '').trim().replace(',', '.')
         if (/e\+?\d+/i.test(tel)) tel = Math.round(parseFloat(tel)).toString()
         tel = tel.replace(/\D/g, '')
-        if (!r.nome?.trim() || tel.length < 8 || tel.length > 15) { invalid.push(r); continue }
+        if (!r.nome?.trim() || !tel) { invalid.push(r); continue }
         valid.push({ ...r, telefone: tel })
       }
       const existing = await db.getContacts(userId)
       const merged = [...existing, ...valid]
       await db.saveContacts(merged, userId)
-      json({ ok: true, contacts: merged, imported: valid.length, invalid: invalid.length })
+      const invalidSamples = invalid.slice(0, 3).map(r => JSON.stringify(r).slice(0, 60))
+      json({ ok: true, contacts: merged, imported: valid.length, invalid: invalid.length, invalidSamples })
     } catch (e) { json({ error: e.message }, 400) }
     return
   }
