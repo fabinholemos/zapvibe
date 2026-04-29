@@ -56,6 +56,7 @@ const LOGIN_HTML = `<!DOCTYPE html>
 </head>
 <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center">
 <div class="w-full max-w-sm px-4">
+  <div class="mb-4"><a href="/" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Voltar ao início</a></div>
   <div class="flex flex-col items-center mb-8">
     <div class="w-12 h-12 rounded-2xl bg-violet-600 flex items-center justify-center text-2xl mb-3">⚡</div>
     <h1 class="text-xl font-bold">ZapVibe</h1>
@@ -1777,6 +1778,7 @@ const REGISTER_HTML = `<!DOCTYPE html>
 </head>
 <body class="bg-gray-950 text-white min-h-screen flex items-center justify-center px-4">
 <div class="w-full max-w-sm">
+  <div class="mb-4"><a href="/" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">← Voltar ao início</a></div>
   <div class="flex flex-col items-center mb-8">
     <div class="w-12 h-12 rounded-2xl bg-violet-600 flex items-center justify-center text-2xl mb-3">⚡</div>
     <h1 class="text-xl font-bold">ZapVibe</h1>
