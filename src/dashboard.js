@@ -2048,6 +2048,11 @@ const server = http.createServer(async (req, res) => {
 
   if (url === '/favicon.ico') { res.writeHead(204); res.end(); return }
 
+  if (url === '/ping') {
+    await db.ping().catch(() => {})
+    res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('ok'); return
+  }
+
   // Register page
   if (url === '/register' && method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })

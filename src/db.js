@@ -437,8 +437,12 @@ async function deleteSession(token) {
   await pool.query('DELETE FROM sessions WHERE token=$1', [token])
 }
 
+async function ping() {
+  await pool.query('SELECT 1')
+}
+
 module.exports = {
-  init,
+  init, ping,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
   getDraft, saveDraft,
   getTemplates, addTemplate, updateTemplate, deleteTemplate,
