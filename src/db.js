@@ -62,6 +62,18 @@ async function init() {
       id INTEGER PRIMARY KEY DEFAULT 1,
       content TEXT DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'admin',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL
+    );
     INSERT INTO draft (id, content) VALUES (1, '') ON CONFLICT DO NOTHING;
   `)
 }
@@ -291,6 +303,42 @@ async function saveLidEntry(lid, jid) {
   )
 }
 
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+async function upsertUser(email, passwordHash, role = 'admin') {
+  await pool.query(
+    `INSERT INTO users (email, password_hash, role)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (email) DO UPDATE SET password_hash=$2, role=$3`,
+    [email, passwordHash, role]
+  )
+}
+
+async function getUserByEmail(email) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE email=$1', [email])
+  return rows[0] || null
+}
+
+async function createSession(token, email) {
+  const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 dias
+  await pool.query(
+    'INSERT INTO sessions (token, email, expires_at) VALUES ($1,$2,$3)',
+    [token, email, expires]
+  )
+}
+
+async function getSession(token) {
+  const { rows } = await pool.query(
+    'SELECT * FROM sessions WHERE token=$1 AND expires_at > NOW()',
+    [token]
+  )
+  return rows[0] || null
+}
+
+async function deleteSession(token) {
+  await pool.query('DELETE FROM sessions WHERE token=$1', [token])
+}
+
 module.exports = {
   init,
   getContacts, saveContacts, addContact, updateContact, deleteContact,
@@ -299,5 +347,6 @@ module.exports = {
   getAutoreplies, addAutoreply, updateAutoreply, deleteAutoreply,
   getCampaignLog, addCampaignLog,
   getGroups, addGroup, updateGroup, deleteGroup,
-  getLidEntry, saveLidEntry
+  getLidEntry, saveLidEntry,
+  upsertUser, getUserByEmail, createSession, getSession, deleteSession
 }

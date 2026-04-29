@@ -2,7 +2,111 @@ require('dotenv').config()
 const http = require('http')
 const { exec } = require('child_process')
 const { parse } = require('csv-parse/sync')
+const crypto = require('crypto')
 const db = require('./db')
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+function hashPassword(password) {
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(16).toString('hex')
+    crypto.scrypt(password, salt, 64, (err, key) => {
+      if (err) reject(err)
+      else resolve(`${salt}:${key.toString('hex')}`)
+    })
+  })
+}
+
+function verifyPassword(password, hash) {
+  return new Promise((resolve, reject) => {
+    const [salt, key] = hash.split(':')
+    crypto.scrypt(password, salt, 64, (err, derived) => {
+      if (err) reject(err)
+      else resolve(derived.toString('hex') === key)
+    })
+  })
+}
+
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex')
+}
+
+function parseCookies(req) {
+  const header = req.headers.cookie || ''
+  return Object.fromEntries(header.split(';').map(c => c.trim().split('=').map(decodeURIComponent)))
+}
+
+async function getAuthSession(req) {
+  const cookies = parseCookies(req)
+  if (!cookies.session) return null
+  return db.getSession(cookies.session)
+}
+
+const LOGIN_HTML = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZapVibe — Login</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+*{font-family:'Inter',sans-serif}
+</style>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex items-center justify-center">
+<div class="w-full max-w-sm px-4">
+  <div class="flex flex-col items-center mb-8">
+    <div class="w-12 h-12 rounded-2xl bg-violet-600 flex items-center justify-center text-2xl mb-3">⚡</div>
+    <h1 class="text-xl font-bold">ZapVibe</h1>
+    <p class="text-sm text-gray-500 mt-1">Disparador inteligente de WhatsApp</p>
+  </div>
+  <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6">
+    <h2 class="text-base font-semibold mb-5">Entrar</h2>
+    <div id="err" class="hidden bg-red-950 border border-red-800 text-red-300 text-sm px-4 py-2.5 rounded-xl mb-4"></div>
+    <form id="form" class="space-y-4">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">E-mail</label>
+        <input id="email" type="email" required autocomplete="email"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 transition-colors"
+          placeholder="seu@email.com">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1.5">Senha</label>
+        <input id="pass" type="password" required autocomplete="current-password"
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 transition-colors"
+          placeholder="••••••••">
+      </div>
+      <button type="submit"
+        class="w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-2.5 rounded-xl transition-colors text-sm">
+        Entrar
+      </button>
+    </form>
+  </div>
+</div>
+<script>
+document.getElementById('form').onsubmit = async e => {
+  e.preventDefault()
+  const btn = e.target.querySelector('button')
+  btn.disabled = true; btn.textContent = 'Entrando...'
+  const err = document.getElementById('err')
+  err.classList.add('hidden')
+  const res = await fetch('/login', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('pass').value })
+  })
+  if (res.ok) { window.location.href = '/' }
+  else {
+    const d = await res.json()
+    err.textContent = d.error || 'Erro ao entrar'
+    err.classList.remove('hidden')
+    btn.disabled = false; btn.textContent = 'Entrar'
+  }
+}
+</script>
+</body>
+</html>`
 
 const PORT = process.env.PORT || 3000
 const API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080'
@@ -1553,6 +1657,44 @@ const server = http.createServer(async (req, res) => {
 
   if (url === '/favicon.ico') { res.writeHead(204); res.end(); return }
 
+  // Login page
+  if (url === '/login' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(LOGIN_HTML); return
+  }
+
+  if (url === '/login' && method === 'POST') {
+    const body = await readBody(req)
+    const user = await db.getUserByEmail((body.email || '').toLowerCase().trim())
+    if (!user) { json({ error: 'E-mail ou senha inválidos' }, 401); return }
+    const ok = await verifyPassword(body.password || '', user.password_hash)
+    if (!ok) { json({ error: 'E-mail ou senha inválidos' }, 401); return }
+    const token = generateToken()
+    await db.createSession(token, user.email)
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Set-Cookie': `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800`
+    })
+    res.end(JSON.stringify({ ok: true })); return
+  }
+
+  if (url === '/logout' && method === 'POST') {
+    const cookies = parseCookies(req)
+    if (cookies.session) await db.deleteSession(cookies.session)
+    res.writeHead(302, {
+      'Set-Cookie': 'session=; HttpOnly; Path=/; Max-Age=0',
+      'Location': '/login'
+    })
+    res.end(); return
+  }
+
+  // Auth guard — todas as rotas abaixo exigem sessão válida
+  const session = await getAuthSession(req)
+  if (!session) {
+    if (url.startsWith('/api/')) { json({ error: 'Não autorizado' }, 401); return }
+    res.writeHead(302, { 'Location': '/login' }); res.end(); return
+  }
+
   if (url === '/' || url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
     res.end(HTML)
@@ -1759,7 +1901,19 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404); res.end('Not found')
 })
 
-db.init().then(() => {
+async function seedAdmin() {
+  const email = (process.env.ADMIN_EMAIL || 'fabio.administradorl@gmail.com').toLowerCase()
+  const password = process.env.ADMIN_PASSWORD
+  if (!password) {
+    console.log('⚠ ADMIN_PASSWORD não definido — defina a variável de ambiente')
+    return
+  }
+  const hash = await hashPassword(password)
+  await db.upsertUser(email, hash)
+  console.log(`✔ Admin configurado: ${email}`)
+}
+
+db.init().then(seedAdmin).then(() => {
   server.listen(PORT, () => {
     console.log(`\n⚡ ZapVibe Dashboard → http://localhost:${PORT}\n`)
     if (process.platform === 'win32') exec(`start "" "http://localhost:${PORT}"`)
