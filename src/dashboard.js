@@ -589,6 +589,19 @@ textarea{resize:vertical}
         <input id="f-emp" placeholder="Empresa (opcional)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
         <input id="f-ext" placeholder="Info extra (opcional)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
       </div>
+      <!-- Grupo -->
+      <div class="mb-3">
+        <div class="flex gap-2 items-center">
+          <select id="f-group" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500 text-gray-400">
+            <option value="">Nenhum grupo</option>
+          </select>
+          <button type="button" onclick="toggleNewGroupInline()" class="text-xs px-3 py-2 bg-gray-800 hover:bg-violet-700/60 border border-gray-700 text-gray-300 rounded-xl transition-colors whitespace-nowrap">+ Novo grupo</button>
+        </div>
+        <div id="new-group-inline" class="hidden mt-2 flex gap-2">
+          <input id="f-new-group-name" placeholder="Nome do novo grupo" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+          <button type="button" onclick="createGroupInline()" class="px-3 py-2 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded-xl">Criar</button>
+        </div>
+      </div>
       <div class="flex gap-2">
         <button onclick="addContact()" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-xl">Salvar</button>
         <button onclick="toggleAddForm()" class="px-4 py-2 bg-gray-800 text-gray-400 text-sm rounded-xl">Cancelar</button>
@@ -1017,7 +1030,13 @@ function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 
 function toggleAddForm() {
   const f = document.getElementById('add-form')
+  const opening = f.classList.contains('hidden')
   f.classList.toggle('hidden')
+  if (opening) {
+    const sel = document.getElementById('f-group')
+    sel.innerHTML = '<option value="">Nenhum grupo</option>'
+    groups.forEach(g => { const o = document.createElement('option'); o.value=g.id; o.textContent=g.name; sel.appendChild(o) })
+  }
 }
 
 async function addContact() {
@@ -1030,13 +1049,50 @@ async function addContact() {
   if (!c.nome || !c.telefone) { alert('Nome e telefone obrigatórios'); return }
   contacts.push(c)
   await fetch('/api/contacts', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(contacts) })
+
+  // Adiciona ao grupo se selecionado
+  const groupId = document.getElementById('f-group').value
+  if (groupId) {
+    const grp = groups.find(g => g.id === groupId)
+    if (grp) {
+      const phone = c.telefone.replace(/\D/g,'')
+      if (!grp.phones.includes(phone)) {
+        grp.phones.push(phone)
+        await fetch(\`/api/groups/\${groupId}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ phones: grp.phones }) })
+      }
+    }
+  }
+
   document.getElementById('f-nome').value=''
   document.getElementById('f-tel').value=''
   document.getElementById('f-emp').value=''
   document.getElementById('f-ext').value=''
+  document.getElementById('f-group').value=''
   toggleAddForm()
   filtered = [...contacts]
   renderContacts()
+}
+
+function toggleNewGroupInline() {
+  const el = document.getElementById('new-group-inline')
+  el.classList.toggle('hidden')
+  if (!el.classList.contains('hidden')) document.getElementById('f-new-group-name').focus()
+}
+
+async function createGroupInline() {
+  const name = document.getElementById('f-new-group-name').value.trim()
+  if (!name) return
+  const res = await fetch('/api/groups', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name }) })
+  const grp = await res.json()
+  groups.push(grp)
+  // Adiciona ao select e seleciona
+  const sel = document.getElementById('f-group')
+  const opt = document.createElement('option')
+  opt.value = grp.id; opt.textContent = grp.name
+  sel.appendChild(opt)
+  sel.value = grp.id
+  document.getElementById('f-new-group-name').value=''
+  document.getElementById('new-group-inline').classList.add('hidden')
 }
 
 async function deleteContact(idx) {
