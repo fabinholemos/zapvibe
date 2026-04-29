@@ -2214,12 +2214,21 @@ const server = http.createServer(async (req, res) => {
     try {
       const csv = body.csv || ''
       const delimiter = (csv.split('\n')[0] || '').includes(';') ? ';' : ','
-      const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, delimiter, relax_column_count: true })
+      const rawRecords = parse(csv, { columns: true, skip_empty_lines: true, trim: true, delimiter, relax_column_count: true })
+      // Normaliza chaves para minúsculas
+      const records = rawRecords.map(r => {
+        const n = {}
+        for (const k of Object.keys(r)) n[k.toLowerCase().trim()] = r[k]
+        return n
+      })
       const valid = [], invalid = []
       for (const r of records) {
-        const p = (r.telefone || '').replace(/\D/g, '')
-        if (!r.nome?.trim() || p.length < 8 || p.length > 15) { invalid.push(r); continue }
-        valid.push(r)
+        // Resolve notação científica do Excel (ex: 1,2E+10 ou 1.2E+10)
+        let tel = String(r.telefone || '').replace(',', '.')
+        if (/e\+?\d+/i.test(tel)) tel = Math.round(parseFloat(tel)).toString()
+        tel = tel.replace(/\D/g, '')
+        if (!r.nome?.trim() || tel.length < 8 || tel.length > 15) { invalid.push(r); continue }
+        valid.push({ ...r, telefone: tel })
       }
       const existing = await db.getContacts(userId)
       const merged = [...existing, ...valid]
