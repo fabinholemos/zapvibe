@@ -1299,10 +1299,15 @@ async function startCampaign() {
   if (!contacts.length) { alert('Nenhum contato. Adicione na aba Contatos.'); return }
   const tpl = document.getElementById('tpl').value.trim()
   if (!tpl) { alert('Mensagem vazia.'); return }
-  const targetContacts = selected.size > 0 ? contacts.filter((_,i) => selected.has(i)) : contacts
+  const remarketingContacts = window._remarketingContacts || null
+  const targetContacts = remarketingContacts
+    ? remarketingContacts
+    : (selected.size > 0 ? contacts.filter((_,i) => selected.has(i)) : contacts)
   const limit = parseInt(document.getElementById('cfg-limit').value)
   const finalCount = Math.min(targetContacts.length, limit)
-  const selLabel = selected.size > 0 ? \`\${selected.size} selecionados\` : 'todos os contatos'
+  const selLabel = remarketingContacts
+    ? \`\${finalCount} contatos (remarketing)\`
+    : selected.size > 0 ? \`\${selected.size} selecionados\` : 'todos os contatos'
   if (!confirm(\`Disparar para \${finalCount} contatos (\${selLabel})?\`)) return
 
   document.getElementById('btn-start').classList.add('hidden')
@@ -1327,6 +1332,7 @@ async function startCampaign() {
       templateName: window._activeTplName || null
     })
   })
+  if (remarketingContacts) clearRemarketing()
 
   pollTimer = setInterval(pollProgress, 1000)
 }
@@ -1719,20 +1725,69 @@ function renderHistory(history) {
   histEl.innerHTML = history.map((h, i) => {
     const dt = new Date(h.sentAt)
     const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})
+    const daysAgo = Math.floor((Date.now() - dt) / 86400000)
+    const daysLabel = daysAgo === 0 ? 'hoje' : daysAgo === 1 ? '1 dia atrás' : daysAgo + ' dias atrás'
     const contactList = (h.contacts || []).map(c => \`<li>\${esc(c.nome)} — \${esc(c.telefone)}</li>\`).join('')
+    const hasContacts = (h.contacts||[]).length > 0
     return \`<div class="px-4 py-3">
-      <div class="flex items-center justify-between mb-1">
-        <div class="flex items-center gap-3">
+      <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
+        <div class="flex items-center gap-3 flex-wrap">
           <span class="text-sm font-medium text-white">\${esc(h.templateName || 'Campanha #' + (i+1))}</span>
           <span class="text-xs text-green-400">✔ \${h.sent || h.phones?.length || 0} enviadas</span>
           \${(h.failed||0) > 0 ? \`<span class="text-xs text-red-400">✘ \${h.failed} falhas</span>\` : ''}
+          <span class="text-xs text-gray-600">\${daysLabel}</span>
         </div>
-        <span class="text-xs text-gray-500">\${dateStr}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500">\${dateStr}</span>
+          \${hasContacts ? \`<button onclick='startRemarketing(\${JSON.stringify(h).replace(/'/g,"&#39;")})' class="text-xs px-2.5 py-1 bg-amber-900/50 hover:bg-amber-800/70 border border-amber-700/40 text-amber-300 rounded-lg transition-colors font-medium">↩ Remarketar</button>\` : ''}
+        </div>
       </div>
       \${contactList ? \`<details class="mt-1"><summary class="text-xs text-gray-500 cursor-pointer hover:text-gray-300">Ver contatos (\${(h.contacts||[]).length})</summary>
         <ul class="mt-1 space-y-0.5 text-xs text-gray-400 pl-3 font-mono">\${contactList}</ul></details>\` : ''}
     </div>\`
   }).join('')
+}
+
+function startRemarketing(campaign) {
+  const contacts = campaign.contacts || []
+  if (!contacts.length) { alert('Campanha sem dados de contatos para remarketar.'); return }
+  const daysAgo = Math.floor((Date.now() - new Date(campaign.sentAt)) / 86400000)
+  const label = daysAgo === 0 ? 'hoje' : daysAgo === 1 ? '1 dia atrás' : daysAgo + ' dias atrás'
+  // Guarda contatos de remarketing
+  window._remarketingContacts = contacts
+  window._remarketingLabel = \`↩ Remarketing: "\${campaign.templateName||'Campanha'}" (\${contacts.length} contatos · enviada \${label})\`
+  // Vai para aba campanha
+  tab('campaign')
+  // Mostra banner e ativa modo remarketing
+  setTimeout(() => {
+    let banner = document.getElementById('remarketing-banner')
+    if (!banner) {
+      banner = document.createElement('div')
+      banner.id = 'remarketing-banner'
+      const campPanel = document.getElementById('p-campaign')
+      campPanel.insertBefore(banner, campPanel.firstChild)
+    }
+    banner.className = 'bg-amber-950/50 border border-amber-700/40 rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3'
+    banner.innerHTML = \`
+      <div class="flex items-center gap-2">
+        <span class="text-amber-400 text-base">↩</span>
+        <div>
+          <p class="text-sm font-medium text-amber-200">\${esc(window._remarketingLabel)}</p>
+          <p class="text-xs text-amber-400/70 mt-0.5">Campanha usará esses \${contacts.length} contatos. Escreva a mensagem de follow-up abaixo.</p>
+        </div>
+      </div>
+      <button onclick="clearRemarketing()" class="text-xs px-2.5 py-1 bg-amber-900/60 hover:bg-amber-800 text-amber-300 rounded-lg transition-colors whitespace-nowrap">✕ Cancelar</button>
+    \`
+    updateCampSummary()
+  }, 100)
+}
+
+function clearRemarketing() {
+  window._remarketingContacts = null
+  window._remarketingLabel = null
+  const banner = document.getElementById('remarketing-banner')
+  if (banner) banner.remove()
+  updateCampSummary()
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
