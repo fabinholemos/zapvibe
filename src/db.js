@@ -33,7 +33,8 @@ async function init() {
       nome TEXT DEFAULT '',
       telefone TEXT NOT NULL,
       empresa TEXT DEFAULT '',
-      extra TEXT DEFAULT ''
+      extra TEXT DEFAULT '',
+      vencimento TEXT DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS templates (
       id TEXT PRIMARY KEY,
@@ -94,6 +95,7 @@ async function init() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE contacts ADD COLUMN IF NOT EXISTS vencimento TEXT DEFAULT '';
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
@@ -123,7 +125,7 @@ async function init() {
 // ── Contacts ──────────────────────────────────────────────────────────────────
 
 async function getContacts(userId) {
-  const { rows } = await pool.query('SELECT nome, telefone, empresa, extra FROM contacts WHERE user_id=$1 ORDER BY id', [userId])
+  const { rows } = await pool.query('SELECT nome, telefone, empresa, extra, vencimento FROM contacts WHERE user_id=$1 ORDER BY id', [userId])
   return rows
 }
 
@@ -134,8 +136,8 @@ async function saveContacts(contacts, userId) {
     await client.query('DELETE FROM contacts WHERE user_id=$1', [userId])
     for (const c of contacts) {
       await client.query(
-        'INSERT INTO contacts (user_id, nome, telefone, empresa, extra) VALUES ($1,$2,$3,$4,$5)',
-        [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '']
+        'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento) VALUES ($1,$2,$3,$4,$5,$6)',
+        [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '', c.vencimento || '']
       )
     }
     await client.query('COMMIT')
@@ -149,15 +151,15 @@ async function saveContacts(contacts, userId) {
 
 async function addContact(c, userId) {
   await pool.query(
-    'INSERT INTO contacts (user_id, nome, telefone, empresa, extra) VALUES ($1,$2,$3,$4,$5)',
-    [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '']
+    'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento) VALUES ($1,$2,$3,$4,$5,$6)',
+    [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '', c.vencimento || '']
   )
 }
 
 async function updateContact(oldTelefone, c, userId) {
   await pool.query(
-    'UPDATE contacts SET nome=$1, telefone=$2, empresa=$3, extra=$4 WHERE telefone=$5 AND user_id=$6',
-    [c.nome || '', c.telefone || oldTelefone, c.empresa || '', c.extra || '', oldTelefone, userId]
+    'UPDATE contacts SET nome=$1, telefone=$2, empresa=$3, extra=$4, vencimento=$5 WHERE telefone=$6 AND user_id=$7',
+    [c.nome || '', c.telefone || oldTelefone, c.empresa || '', c.extra || '', c.vencimento || '', oldTelefone, userId]
   )
 }
 

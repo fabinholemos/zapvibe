@@ -275,6 +275,7 @@ function applyTemplate(tpl, c) {
     .replace(/\{empresa\}/gi, c.empresa || '')
     .replace(/\{extra\}/gi, c.extra || '')
     .replace(/\{telefone\}/gi, c.telefone || '')
+    .replace(/\{vencimento\}/gi, c.vencimento || '')
 }
 
 function formatPhone(phone) {
@@ -552,6 +553,9 @@ textarea{resize:vertical}
 
   <!-- ── TAB: Contatos ── -->
   <div id="p-contacts" class="hidden fade">
+    <div class="bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-2.5 mb-3 text-xs text-gray-400">
+      📋 Colunas suportadas no CSV: <span class="font-mono text-gray-300">nome, telefone, empresa, extra, vencimento</span> — use <span class="font-mono text-green-400">{vencimento}</span> no template para personalizar datas (ex: IPTV, assinaturas)
+    </div>
     <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
       <div class="flex gap-2">
         <input id="search" oninput="filterContacts()" placeholder="Buscar..." class="bg-gray-900 border border-gray-800 rounded-xl px-3 py-2 text-sm w-48 focus:outline-none focus:border-violet-500"/>
@@ -624,10 +628,11 @@ textarea{resize:vertical}
       <div class="md:col-span-2 bg-gray-900 border border-gray-800 rounded-2xl p-5">
         <div class="flex items-center justify-between mb-2">
           <p class="text-xs text-gray-500 uppercase tracking-wider">Mensagem</p>
-          <div class="flex gap-2 text-xs text-gray-600">
+          <div class="flex gap-2 text-xs text-gray-600 flex-wrap">
             <button onclick="insertVar('{nome}')" class="hover:text-violet-400 transition-colors">{nome}</button>
             <button onclick="insertVar('{empresa}')" class="hover:text-violet-400 transition-colors">{empresa}</button>
             <button onclick="insertVar('{extra}')" class="hover:text-violet-400 transition-colors">{extra}</button>
+            <button onclick="insertVar('{vencimento}')" class="hover:text-green-400 transition-colors text-green-600">{vencimento}</button>
           </div>
         </div>
         <textarea id="tpl" rows="7" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-violet-500 font-mono"></textarea>
