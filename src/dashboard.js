@@ -3,6 +3,7 @@ const http = require('http')
 const { exec } = require('child_process')
 const { parse } = require('csv-parse/sync')
 const crypto = require('crypto')
+const nodemailer = require('nodemailer')
 const db = require('./db')
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -122,6 +123,7 @@ Posso te mostrar como funciona em poucos minutos?`
 
 const campaigns = new Map() // userId → campaign state
 const mediaStore = new Map() // userId → currentMedia
+const MEDIA_LIMITS = { image: 5*1024*1024, audio: 10*1024*1024, document: 10*1024*1024, video: 15*1024*1024 }
 const replyTracker = new Map() // phone → timestamp (anti-loop)
 const REPLY_COOLDOWN = 5 * 60 * 1000
 
@@ -352,6 +354,34 @@ async function sendWhatsappMedia(phone, caption, media, instanceName) {
       media: media.base64,
       fileName: media.filename
     }
+  })
+}
+
+async function notifyAdminNewUser(name, email, phone) {
+  const smtpPass = process.env.SMTP_PASS
+  const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase()
+  if (!smtpPass || !adminEmail) return
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: adminEmail, pass: smtpPass }
+  })
+  const when = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+  await transporter.sendMail({
+    from: `"ZapVibe" <${adminEmail}>`,
+    to: adminEmail,
+    subject: `🆕 Novo cadastro: ${name}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#111;color:#e5e7eb;border-radius:12px;padding:24px">
+        <h2 style="color:#8b5cf6;margin-top:0">🆕 Novo cadastro no ZapVibe</h2>
+        <table style="width:100%;border-collapse:collapse">
+          <tr><td style="padding:8px 0;color:#9ca3af;width:100px">👤 Nome</td><td style="padding:8px 0"><b>${name}</b></td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af">📧 E-mail</td><td style="padding:8px 0">${email}</td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af">📱 Telefone</td><td style="padding:8px 0">${phone}</td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af">⏰ Horário</td><td style="padding:8px 0">${when}</td></tr>
+        </table>
+        <hr style="border:1px solid #374151;margin:16px 0"/>
+        <p style="color:#9ca3af;font-size:13px;margin:0">Acesse o painel admin para ativar a conta.</p>
+      </div>`
   })
 }
 
@@ -1112,7 +1142,14 @@ textarea{resize:vertical}
   <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 fade">
     <p class="text-sm font-semibold mb-4">Salvar template</p>
     <input id="tpl-name-input" placeholder="Nome do template (ex: Promoção de Maio)" autocomplete="off"
-      class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-4 focus:outline-none focus:border-violet-500"/>
+      class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-3 focus:outline-none focus:border-violet-500"/>
+    <div id="modal-media-info" class="hidden mb-3 flex items-center gap-2 bg-gray-800 rounded-xl px-3 py-2">
+      <span id="modal-media-icon" class="text-lg"></span>
+      <div class="flex-1 min-w-0">
+        <p class="text-xs text-gray-300">Mídia anexada</p>
+        <p id="modal-media-name" class="text-xs text-gray-500 truncate"></p>
+      </div>
+    </div>
     <div class="flex gap-2">
       <button onclick="confirmSaveTemplate()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
       <button onclick="closeSaveModal()" class="flex-1 py-2 bg-gray-800 text-gray-400 text-sm rounded-xl">Cancelar</button>
@@ -1127,6 +1164,7 @@ let selected = new Set()
 let pollTimer = null
 let groups = []
 let activeGroup = null // id do grupo ativo no filtro de contatos
+let _currentMedia = null // { base64, mimetype, filename, mediatype } — mídia atual da seção de campanha
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 function tab(id) {
@@ -1492,6 +1530,15 @@ function openSaveModal() {
   const tpl = document.getElementById('tpl').value.trim()
   if (!tpl) { alert('Escreva a mensagem antes de salvar.'); return }
   document.getElementById('tpl-name-input').value = ''
+  const mi = document.getElementById('modal-media-info')
+  if (_currentMedia) {
+    const icons = { image: '🖼', video: '🎥', audio: '🎵', document: '📄' }
+    document.getElementById('modal-media-icon').textContent = icons[_currentMedia.mediatype] || '📎'
+    document.getElementById('modal-media-name').textContent = _currentMedia.filename
+    mi.classList.remove('hidden')
+  } else {
+    mi.classList.add('hidden')
+  }
   document.getElementById('save-modal').classList.remove('hidden')
   setTimeout(() => document.getElementById('tpl-name-input').focus(), 50)
 }
@@ -1506,10 +1553,17 @@ async function confirmSaveTemplate() {
   const name = document.getElementById('tpl-name-input').value.trim()
   if (!name) { alert('Dê um nome ao template.'); return }
   const content = document.getElementById('tpl').value.trim()
-  await fetch('/api/templates', {
+  const r = await fetch('/api/templates', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ name, content })
-  })
+    body: JSON.stringify({
+      name, content,
+      media_data: _currentMedia?.base64 || null,
+      media_type: _currentMedia?.mediatype || null,
+      media_name: _currentMedia?.filename || null,
+      media_mimetype: _currentMedia?.mimetype || null
+    })
+  }).then(r => r.json())
+  if (r.error) { alert('Erro ao salvar: ' + r.error); return }
   closeSaveModal()
   await loadTemplateList()
 }
@@ -1519,10 +1573,11 @@ async function loadTemplateList() {
   const el = document.getElementById('tpl-list')
   document.getElementById('tpl-count').textContent = list.length + ' template' + (list.length !== 1 ? 's' : '')
   if (!list.length) { el.innerHTML = '<p class="text-xs text-gray-600 text-center py-4">Nenhum template salvo ainda.</p>'; return }
+  const mediaBadge = t => t.mediaType ? \`<span class="ml-1 text-xs px-1.5 py-0.5 bg-gray-700 text-gray-400 rounded">\${{image:'🖼',video:'🎥',audio:'🎵',document:'📄'}[t.mediaType]||'📎'}</span>\` : ''
   el.innerHTML = list.map(t => \`
     <div class="flex items-center gap-3 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-xl px-4 py-3 group transition-colors">
       <div class="flex-1 min-w-0 cursor-pointer" onclick="loadSavedTemplate('\${t.id}')">
-        <p class="text-sm font-medium text-white truncate">\${esc(t.name)}</p>
+        <p class="text-sm font-medium text-white truncate">\${esc(t.name)}\${mediaBadge(t)}</p>
         <p class="text-xs text-gray-500 truncate mt-0.5">\${esc(t.content.slice(0,80))}\${t.content.length>80?'...':''}</p>
       </div>
       <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1534,12 +1589,30 @@ async function loadTemplateList() {
 }
 
 async function loadSavedTemplate(id) {
-  const list = await fetch('/api/templates').then(r => r.json())
-  const t = list.find(t => t.id === id)
-  if (!t) return
+  const t = await fetch('/api/templates/' + id).then(r => r.json())
+  if (!t || t.error) return
   document.getElementById('tpl').value = t.content
   window._activeTplId = t.id
   window._activeTplName = t.name
+  if (t.mediaData && t.mediaType) {
+    await fetch('/api/media/upload', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ base64: t.mediaData, mimetype: t.mediaMimetype, filename: t.mediaName })
+    })
+    _currentMedia = { base64: t.mediaData, mimetype: t.mediaMimetype, filename: t.mediaName, mediatype: t.mediaType }
+    showMediaPreview(t.mediaType, t.mediaName, 'data:' + t.mediaMimetype + ';base64,' + t.mediaData)
+  } else {
+    await fetch('/api/media', { method: 'DELETE' })
+    _currentMedia = null
+    document.getElementById('media-placeholder').classList.remove('hidden')
+    document.getElementById('media-preview').classList.add('hidden')
+    document.getElementById('media-preview').classList.remove('flex')
+    document.getElementById('media-badge').classList.add('hidden')
+    document.getElementById('media-remove').classList.add('hidden')
+    document.getElementById('prev-img').src = ''
+    document.getElementById('prev-vid').src = ''
+    document.getElementById('prev-aud').src = ''
+  }
   document.getElementById('tpl').scrollIntoView({ behavior: 'smooth', block: 'center' })
   document.getElementById('tpl').focus()
 }
@@ -1549,7 +1622,18 @@ async function updateSavedTemplate(id, currentName) {
   if (!content) { alert('Editor está vazio. Carregue o template primeiro clicando em "Usar".'); return }
   const name = prompt('Nome do template:', currentName)
   if (name === null) return
-  await fetch('/api/templates/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ name: name || currentName, content }) })
+  const r = await fetch('/api/templates/' + id, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      name: name || currentName,
+      content,
+      media_data: _currentMedia?.base64 || null,
+      media_type: _currentMedia?.mediatype || null,
+      media_name: _currentMedia?.filename || null,
+      media_mimetype: _currentMedia?.mimetype || null
+    })
+  }).then(r => r.json())
+  if (r.error) { alert('Erro ao atualizar: ' + r.error); return }
   await loadTemplateList()
   const s = document.getElementById('tpl-saved')
   s.classList.remove('hidden'); setTimeout(()=>s.classList.add('hidden'), 2000)
@@ -1693,9 +1777,17 @@ function renderResults(results) {
 }
 
 // ── Media ─────────────────────────────────────────────────────────────────────
+const _MEDIA_LIMITS = { image: 5, video: 15, audio: 10, document: 10 } // MB
+
 async function uploadMedia(e) {
   const file = e.target.files[0]
   if (!file) return
+  const mtype = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document'
+  const limitMB = _MEDIA_LIMITS[mtype]
+  if (file.size > limitMB * 1024 * 1024) {
+    alert(\`Arquivo muito grande. Limite para \${mtype}: \${limitMB}MB (este arquivo: \${(file.size/1024/1024).toFixed(1)}MB)\`)
+    e.target.value = ''; return
+  }
   const reader = new FileReader()
   reader.onload = async ev => {
     const dataUrl = ev.target.result
@@ -1704,6 +1796,7 @@ async function uploadMedia(e) {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ base64, mimetype: file.type, filename: file.name })
     }).then(r => r.json())
+    _currentMedia = { base64, mimetype: file.type, filename: file.name, mediatype: r.mediatype }
     showMediaPreview(r.mediatype, file.name, dataUrl)
   }
   reader.readAsDataURL(file)
@@ -1730,6 +1823,7 @@ function showMediaPreview(mediatype, filename, dataUrl) {
 
 async function removeMedia() {
   await fetch('/api/media', { method: 'DELETE' })
+  _currentMedia = null
   document.getElementById('media-placeholder').classList.remove('hidden')
   document.getElementById('media-preview').classList.add('hidden')
   document.getElementById('media-preview').classList.remove('flex')
@@ -2736,7 +2830,9 @@ const server = http.createServer(async (req, res) => {
     if (existing) { json({ error: 'E-mail já cadastrado' }, 409); return }
     const hash = await hashPassword(password)
     await db.registerUser(name, email, phone, hash)
-    json({ ok: true }); return
+    json({ ok: true })
+    notifyAdminNewUser(name, email, phone).catch(e => console.error('[notify] falha ao enviar email:', e.message))
+    return
   }
 
   // Login page
@@ -2978,10 +3074,29 @@ const server = http.createServer(async (req, res) => {
     json(await db.getTemplates(userId)); return
   }
 
+  if (url.startsWith('/api/templates/') && method === 'GET') {
+    const id = url.split('/')[3]
+    const tpl = await db.getTemplateById(id, userId)
+    if (!tpl) { json({ error: 'not found' }, 404); return }
+    json(tpl); return
+  }
+
   if (url === '/api/templates' && method === 'POST') {
     const body = await readBody(req)
     if (!body.name?.trim() || !body.content?.trim()) { json({ error: 'name e content obrigatórios' }, 400); return }
-    const tpl = { id: Date.now().toString(), name: body.name.trim(), content: body.content.trim(), createdAt: new Date().toISOString() }
+    if (body.media_data && body.media_type) {
+      const byteSize = Math.floor(body.media_data.length * 3 / 4)
+      const limit = MEDIA_LIMITS[body.media_type] || 5*1024*1024
+      if (byteSize > limit) { json({ error: `Arquivo muito grande. Limite: ${limit/1024/1024}MB` }, 400); return }
+    }
+    const tpl = {
+      id: Date.now().toString(), name: body.name.trim(), content: body.content.trim(),
+      mediaType: body.media_data ? (body.media_type || null) : null,
+      mediaData: body.media_data || null,
+      mediaName: body.media_name || null,
+      mediaMimetype: body.media_mimetype || null,
+      createdAt: new Date().toISOString()
+    }
     json(await db.addTemplate(tpl, userId)); return
   }
 
@@ -2994,7 +3109,19 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith('/api/templates/') && method === 'PUT') {
     const id = url.split('/')[3]
     const body = await readBody(req)
-    await db.updateTemplate(id, { name: body.name?.trim(), content: body.content?.trim() }, userId)
+    if (body.media_data && body.media_type) {
+      const byteSize = Math.floor(body.media_data.length * 3 / 4)
+      const limit = MEDIA_LIMITS[body.media_type] || 5*1024*1024
+      if (byteSize > limit) { json({ error: `Arquivo muito grande. Limite: ${limit/1024/1024}MB` }, 400); return }
+    }
+    await db.updateTemplate(id, {
+      name: body.name?.trim(),
+      content: body.content?.trim(),
+      mediaType: body.media_data !== undefined ? (body.media_data ? body.media_type : null) : undefined,
+      mediaData: body.media_data !== undefined ? (body.media_data || null) : undefined,
+      mediaName: body.media_data !== undefined ? (body.media_name || null) : undefined,
+      mediaMimetype: body.media_data !== undefined ? (body.media_mimetype || null) : undefined
+    }, userId)
     json({ ok: true }); return
   }
 

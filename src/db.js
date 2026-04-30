@@ -159,6 +159,10 @@ async function init() {
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS optout BOOLEAN DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS max_instances INTEGER DEFAULT 1;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_type TEXT;
+    ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_data TEXT;
+    ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_name TEXT;
+    ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_mimetype TEXT;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS responses INTEGER DEFAULT 0;
@@ -268,25 +272,44 @@ async function saveDraft(content, userId) {
 
 async function getTemplates(userId) {
   const { rows } = await pool.query(
-    'SELECT id, name, content, created_at as "createdAt" FROM templates WHERE user_id=$1 ORDER BY created_at',
+    `SELECT id, name, content, media_type as "mediaType", media_name as "mediaName", media_mimetype as "mediaMimetype", created_at as "createdAt"
+     FROM templates WHERE user_id=$1 ORDER BY created_at`,
     [userId]
   )
   return rows
 }
 
+async function getTemplateById(id, userId) {
+  const { rows } = await pool.query(
+    `SELECT id, name, content, media_type as "mediaType", media_data as "mediaData", media_name as "mediaName", media_mimetype as "mediaMimetype", created_at as "createdAt"
+     FROM templates WHERE id=$1 AND user_id=$2`,
+    [id, userId]
+  )
+  return rows[0] || null
+}
+
 async function addTemplate(t, userId) {
   const { rows } = await pool.query(
-    'INSERT INTO templates (id, user_id, name, content, created_at) VALUES ($1,$2,$3,$4,$5) RETURNING id, name, content, created_at as "createdAt"',
-    [t.id, userId, t.name, t.content, t.createdAt]
+    `INSERT INTO templates (id, user_id, name, content, media_type, media_data, media_name, media_mimetype, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     RETURNING id, name, content, media_type as "mediaType", media_name as "mediaName", media_mimetype as "mediaMimetype", created_at as "createdAt"`,
+    [t.id, userId, t.name, t.content, t.mediaType || null, t.mediaData || null, t.mediaName || null, t.mediaMimetype || null, t.createdAt]
   )
   return rows[0]
 }
 
 async function updateTemplate(id, updates, userId) {
-  await pool.query(
-    'UPDATE templates SET name=$1, content=$2 WHERE id=$3 AND user_id=$4',
-    [updates.name, updates.content, id, userId]
-  )
+  if (updates.mediaData !== undefined) {
+    await pool.query(
+      'UPDATE templates SET name=$1, content=$2, media_type=$3, media_data=$4, media_name=$5, media_mimetype=$6 WHERE id=$7 AND user_id=$8',
+      [updates.name, updates.content, updates.mediaType || null, updates.mediaData || null, updates.mediaName || null, updates.mediaMimetype || null, id, userId]
+    )
+  } else {
+    await pool.query(
+      'UPDATE templates SET name=$1, content=$2 WHERE id=$3 AND user_id=$4',
+      [updates.name, updates.content, id, userId]
+    )
+  }
 }
 
 async function deleteTemplate(id, userId) {
@@ -758,7 +781,7 @@ module.exports = {
   getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout,
   getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, deleteUserInstance,
   getDraft, saveDraft,
-  getTemplates, addTemplate, updateTemplate, deleteTemplate,
+  getTemplates, getTemplateById, addTemplate, updateTemplate, deleteTemplate,
   getAutoreplies, addAutoreply, updateAutoreply, deleteAutoreply,
   getCampaignLog, addCampaignLog, trackCampaignResponse,
   getGroups, addGroup, updateGroup, deleteGroup,
