@@ -3,7 +3,7 @@ const http = require('http')
 const { exec } = require('child_process')
 const { parse } = require('csv-parse/sync')
 const crypto = require('crypto')
-const nodemailer = require('nodemailer')
+const https = require('https')
 const db = require('./db')
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -358,30 +358,40 @@ async function sendWhatsappMedia(phone, caption, media, instanceName) {
 }
 
 async function notifyAdminNewUser(name, email, phone) {
-  const smtpPass = process.env.SMTP_PASS
+  const apiKey = process.env.RESEND_API_KEY
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase()
-  if (!smtpPass || !adminEmail) return
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: adminEmail, pass: smtpPass }
-  })
+  if (!apiKey || !adminEmail) return
   const when = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-  await transporter.sendMail({
-    from: `"ZapVibe" <${adminEmail}>`,
-    to: adminEmail,
-    subject: `🆕 Novo cadastro: ${name}`,
+  const payload = JSON.stringify({
+    from: 'ZapVibe <onboarding@resend.dev>',
+    to: [adminEmail],
+    subject: `Novo cadastro: ${name}`,
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#111;color:#e5e7eb;border-radius:12px;padding:24px">
-        <h2 style="color:#8b5cf6;margin-top:0">🆕 Novo cadastro no ZapVibe</h2>
+        <h2 style="color:#8b5cf6;margin-top:0">Novo cadastro no ZapVibe</h2>
         <table style="width:100%;border-collapse:collapse">
-          <tr><td style="padding:8px 0;color:#9ca3af;width:100px">👤 Nome</td><td style="padding:8px 0"><b>${name}</b></td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af">📧 E-mail</td><td style="padding:8px 0">${email}</td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af">📱 Telefone</td><td style="padding:8px 0">${phone}</td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af">⏰ Horário</td><td style="padding:8px 0">${when}</td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af;width:100px">Nome</td><td style="padding:8px 0"><b>${name}</b></td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af">E-mail</td><td style="padding:8px 0">${email}</td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af">Telefone</td><td style="padding:8px 0">${phone}</td></tr>
+          <tr><td style="padding:8px 0;color:#9ca3af">Horario</td><td style="padding:8px 0">${when}</td></tr>
         </table>
         <hr style="border:1px solid #374151;margin:16px 0"/>
         <p style="color:#9ca3af;font-size:13px;margin:0">Acesse o painel admin para ativar a conta.</p>
       </div>`
+  })
+  await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.resend.com', path: '/emails', method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
+    }, res => {
+      let body = ''
+      res.on('data', c => body += c)
+      res.on('end', () => res.statusCode < 300 ? resolve() : reject(new Error(`Resend ${res.statusCode}: ${body}`)))
+    })
+    req.on('error', reject)
+    req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')) })
+    req.write(payload)
+    req.end()
   })
 }
 
@@ -3427,7 +3437,7 @@ async function seedAdmin() {
 
 server.listen(PORT, () => {
   console.log(`\n⚡ ZapVibe Dashboard → http://localhost:${PORT}\n`)
-  console.log(`📧 Email notify: ${process.env.SMTP_PASS ? 'CONFIGURADO' : 'NÃO CONFIGURADO (SMTP_PASS ausente)'}`)
+  console.log(`📧 Email notify: ${process.env.RESEND_API_KEY ? 'CONFIGURADO (Resend)' : 'NÃO CONFIGURADO (RESEND_API_KEY ausente)'}`)
   if (process.platform === 'win32') exec(`start "" "http://localhost:${PORT}"`)
 })
 
