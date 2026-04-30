@@ -311,14 +311,14 @@ function formatPhone(phone) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
-function fetchApi(urlPath, method, body) {
+function fetchApi(urlPath, method, body, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const u = new URL(API_URL + urlPath)
     const isHttps = u.protocol === 'https:'
     const transport = isHttps ? require('https') : require('http')
     const opts = {
       hostname: u.hostname, port: u.port || (isHttps ? 443 : 80),
-      path: u.pathname, method,
+      path: u.pathname + u.search, method,
       headers: { apikey: API_KEY, 'Content-Type': 'application/json' }
     }
     const req = transport.request(opts, res => {
@@ -326,7 +326,7 @@ function fetchApi(urlPath, method, body) {
       res.on('data', c => d += c)
       res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({}) } })
     })
-    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Evolution API timeout')) })
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Evolution API timeout')) })
     req.on('error', reject)
     if (body) req.write(JSON.stringify(body))
     req.end()
@@ -2115,7 +2115,8 @@ async function syncWaGroups(instanceName) {
   try {
     const r = await fetch(\`/api/wa-groups/sync?instance=\${encodeURIComponent(instanceName)}\`, { method: 'POST' }).then(r => r.json())
     if (r.error) { alert('Erro: ' + r.error); return }
-    alert(\`✅ \${r.count} grupo(s) sincronizado(s) de \${instanceName}\`)
+    const debugInfo = r.count === 0 && r.debug ? \`\nResposta da API: \${r.debug}\` : ''
+    alert(\`✅ \${r.count} grupo(s) sincronizado(s) de \${instanceName}\${debugInfo}\`)
     await loadWaGroups()
   } catch (e) {
     alert('Erro ao sincronizar grupos: ' + e.message)
@@ -3367,15 +3368,19 @@ const server = http.createServer(async (req, res) => {
     const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || userInstance
     let raw
     try {
-      raw = await fetchApi(`/group/fetchAllGroups/${instanceName}?getParticipants=false`, 'GET')
+      raw = await fetchApi(`/group/fetchAllGroups/${instanceName}?getParticipants=false`, 'GET', null, 30000)
     } catch (e) {
       json({ error: 'Falha ao buscar grupos da Evolution API: ' + e.message }, 502); return
     }
-    const groups = (Array.isArray(raw) ? raw : []).map(g => ({
-      jid: g.id,
-      name: g.subject || g.id,
-      participants: g.size || 0
-    }))
+    const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.groups) ? raw.groups : [])
+    if (!list.length) {
+      json({ ok: true, count: 0, groups: [], debug: typeof raw === 'object' ? JSON.stringify(raw).slice(0, 300) : String(raw) }); return
+    }
+    const groups = list.map(g => ({
+      jid: g.id || g.jid,
+      name: g.subject || g.name || g.id || g.jid,
+      participants: g.size || g.participants || 0
+    })).filter(g => g.jid)
     await db.syncWaGroups(userId, instanceName, groups)
     json({ ok: true, count: groups.length, groups }); return
   }
