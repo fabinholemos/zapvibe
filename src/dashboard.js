@@ -3368,7 +3368,7 @@ const server = http.createServer(async (req, res) => {
     const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || userInstance
     // Raw call to capture status + body for debugging
     const rawResult = await new Promise(resolve => {
-      const u = new URL(API_URL + `/group/fetchAllGroups/${instanceName}?getParticipants=false`)
+      const u = new URL(API_URL + `/group/fetchAllGroups/${instanceName}`)
       const isHttps = u.protocol === 'https:'
       const transport = isHttps ? require('https') : require('http')
       const req2 = (isHttps ? require('https') : require('http')).request({
