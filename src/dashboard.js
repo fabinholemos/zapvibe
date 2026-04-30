@@ -3359,7 +3359,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   // WA Groups
-  if (url === '/api/wa-groups' && method === 'GET') {
+  if (url.startsWith('/api/wa-groups') && !url.includes('/sync') && method === 'GET') {
     const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || null
     json(await db.getWaGroups(userId, instanceName)); return
   }
