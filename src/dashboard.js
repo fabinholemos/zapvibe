@@ -3,7 +3,7 @@ const http = require('http')
 const { exec } = require('child_process')
 const { parse } = require('csv-parse/sync')
 const crypto = require('crypto')
-const https = require('https')
+const axios = require('axios')
 const db = require('./db')
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -362,7 +362,7 @@ async function notifyAdminNewUser(name, email, phone) {
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase()
   if (!apiKey || !adminEmail) return
   const when = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-  const payload = JSON.stringify({
+  await axios.post('https://api.resend.com/emails', {
     from: 'ZapVibe <onboarding@resend.dev>',
     to: [adminEmail],
     subject: `Novo cadastro: ${name}`,
@@ -378,20 +378,9 @@ async function notifyAdminNewUser(name, email, phone) {
         <hr style="border:1px solid #374151;margin:16px 0"/>
         <p style="color:#9ca3af;font-size:13px;margin:0">Acesse o painel admin para ativar a conta.</p>
       </div>`
-  })
-  await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'api.resend.com', path: '/emails', method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }
-    }, res => {
-      let body = ''
-      res.on('data', c => body += c)
-      res.on('end', () => res.statusCode < 300 ? resolve() : reject(new Error(`Resend ${res.statusCode}: ${body}`)))
-    })
-    req.on('error', reject)
-    req.setTimeout(10000, () => { req.destroy(); reject(new Error('timeout')) })
-    req.write(payload)
-    req.end()
+  }, {
+    headers: { 'Authorization': `Bearer ${apiKey}` },
+    timeout: 10000
   })
 }
 
