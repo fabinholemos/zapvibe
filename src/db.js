@@ -86,6 +86,59 @@ async function init() {
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       content TEXT DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS scheduled_campaigns (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      template TEXT NOT NULL DEFAULT '',
+      template_id TEXT,
+      template_name TEXT DEFAULT '',
+      group_id TEXT DEFAULT '',
+      scheduled_at TIMESTAMPTZ NOT NULL,
+      delay_min INTEGER DEFAULT 8000,
+      delay_max INTEGER DEFAULT 20000,
+      daily_limit INTEGER DEFAULT 150,
+      use_ai BOOLEAN DEFAULT FALSE,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS vencimento_rules (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT '',
+      days_before INTEGER NOT NULL DEFAULT 3,
+      template_content TEXT NOT NULL DEFAULT '',
+      template_id TEXT,
+      template_name TEXT DEFAULT '',
+      active BOOLEAN DEFAULT TRUE,
+      last_run_date TEXT DEFAULT '',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS drips (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT '',
+      steps JSONB DEFAULT '[]',
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS drip_queue (
+      id TEXT PRIMARY KEY,
+      drip_id TEXT NOT NULL,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      phone TEXT NOT NULL,
+      nome TEXT DEFAULT '',
+      step_index INTEGER DEFAULT 0,
+      send_at TIMESTAMPTZ NOT NULL,
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS campaign_responses (
+      campaign_log_id TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      user_id INTEGER,
+      responded_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (campaign_log_id, phone)
+    );
   `)
   // Migração segura: adiciona colunas novas se tabelas já existiam
   await pool.query(`
@@ -96,9 +149,11 @@ async function init() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS vencimento TEXT DEFAULT '';
+    ALTER TABLE contacts ADD COLUMN IF NOT EXISTS optout BOOLEAN DEFAULT FALSE;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS responses INTEGER DEFAULT 0;
     ALTER TABLE groups_table ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE lid_map ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE draft ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
@@ -125,7 +180,7 @@ async function init() {
 // ── Contacts ──────────────────────────────────────────────────────────────────
 
 async function getContacts(userId) {
-  const { rows } = await pool.query('SELECT nome, telefone, empresa, extra, vencimento FROM contacts WHERE user_id=$1 ORDER BY id', [userId])
+  const { rows } = await pool.query('SELECT nome, telefone, empresa, extra, vencimento, optout FROM contacts WHERE user_id=$1 ORDER BY id', [userId])
   return rows
 }
 
@@ -133,11 +188,15 @@ async function saveContacts(contacts, userId) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+    // Preserve optout flags before wiping
+    const { rows: existing } = await client.query('SELECT telefone, optout FROM contacts WHERE user_id=$1', [userId])
+    const optoutMap = new Map(existing.map(c => [c.telefone, c.optout]))
     await client.query('DELETE FROM contacts WHERE user_id=$1', [userId])
     for (const c of contacts) {
+      const optout = optoutMap.get(c.telefone) || false
       await client.query(
-        'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento) VALUES ($1,$2,$3,$4,$5,$6)',
-        [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '', c.vencimento || '']
+        'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento, optout) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '', c.vencimento || '', optout]
       )
     }
     await client.query('COMMIT')
@@ -151,9 +210,17 @@ async function saveContacts(contacts, userId) {
 
 async function addContact(c, userId) {
   await pool.query(
-    'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento) VALUES ($1,$2,$3,$4,$5,$6)',
+    'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento, optout) VALUES ($1,$2,$3,$4,$5,$6,FALSE)',
     [userId, c.nome || '', c.telefone, c.empresa || '', c.extra || '', c.vencimento || '']
   )
+}
+
+async function setOptout(telefone, userId) {
+  await pool.query('UPDATE contacts SET optout=TRUE WHERE telefone=$1 AND user_id=$2', [telefone, userId])
+}
+
+async function clearOptout(telefone, userId) {
+  await pool.query('UPDATE contacts SET optout=FALSE WHERE telefone=$1 AND user_id=$2', [telefone, userId])
 }
 
 async function updateContact(oldTelefone, c, userId) {
@@ -443,15 +510,197 @@ async function ping() {
   await pool.query('SELECT 1')
 }
 
+// ── Scheduled campaigns ───────────────────────────────────────────────────────
+
+async function getSchedules(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, template, template_id as "templateId", template_name as "templateName",
+            group_id as "groupId", scheduled_at as "scheduledAt",
+            delay_min as "delayMin", delay_max as "delayMax", daily_limit as "dailyLimit",
+            use_ai as "useAi", status, created_at as "createdAt"
+     FROM scheduled_campaigns WHERE user_id=$1 ORDER BY scheduled_at`,
+    [userId]
+  )
+  return rows
+}
+
+async function getPendingSchedules(userId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM scheduled_campaigns WHERE user_id=$1 AND status='pending' AND scheduled_at <= NOW()`,
+    [userId]
+  )
+  return rows
+}
+
+async function addSchedule(s, userId) {
+  const { rows } = await pool.query(
+    `INSERT INTO scheduled_campaigns (id, user_id, template, template_id, template_name, group_id, scheduled_at, delay_min, delay_max, daily_limit, use_ai)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     RETURNING id, template, template_id as "templateId", template_name as "templateName",
+               group_id as "groupId", scheduled_at as "scheduledAt",
+               delay_min as "delayMin", delay_max as "delayMax", daily_limit as "dailyLimit",
+               use_ai as "useAi", status, created_at as "createdAt"`,
+    [s.id, userId, s.template, s.templateId || null, s.templateName || '', s.groupId || '',
+     s.scheduledAt, s.delayMin || 8000, s.delayMax || 20000, s.dailyLimit || 150, s.useAi || false]
+  )
+  return rows[0]
+}
+
+async function updateScheduleStatus(id, status) {
+  await pool.query('UPDATE scheduled_campaigns SET status=$1 WHERE id=$2', [status, id])
+}
+
+async function deleteSchedule(id, userId) {
+  await pool.query('DELETE FROM scheduled_campaigns WHERE id=$1 AND user_id=$2', [id, userId])
+}
+
+// ── Vencimento rules ──────────────────────────────────────────────────────────
+
+async function getVencimentoRules(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, name, days_before as "daysBefore", template_content as "templateContent",
+            template_id as "templateId", template_name as "templateName",
+            active, last_run_date as "lastRunDate", created_at as "createdAt"
+     FROM vencimento_rules WHERE user_id=$1 ORDER BY created_at`,
+    [userId]
+  )
+  return rows
+}
+
+async function addVencimentoRule(r, userId) {
+  const { rows } = await pool.query(
+    `INSERT INTO vencimento_rules (id, user_id, name, days_before, template_content, template_id, template_name, active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, name, days_before as "daysBefore", template_content as "templateContent",
+               template_id as "templateId", template_name as "templateName", active, last_run_date as "lastRunDate"`,
+    [r.id, userId, r.name, r.daysBefore, r.templateContent, r.templateId || null, r.templateName || '', r.active !== false]
+  )
+  return rows[0]
+}
+
+async function updateVencimentoRule(id, updates, userId) {
+  const { rows } = await pool.query('SELECT * FROM vencimento_rules WHERE id=$1 AND user_id=$2', [id, userId])
+  const cur = rows[0]; if (!cur) return
+  await pool.query(
+    `UPDATE vencimento_rules SET name=$1, days_before=$2, template_content=$3, template_id=$4, template_name=$5, active=$6
+     WHERE id=$7 AND user_id=$8`,
+    [
+      updates.name !== undefined ? updates.name : cur.name,
+      updates.daysBefore !== undefined ? updates.daysBefore : cur.days_before,
+      updates.templateContent !== undefined ? updates.templateContent : cur.template_content,
+      updates.templateId !== undefined ? updates.templateId : cur.template_id,
+      updates.templateName !== undefined ? updates.templateName : cur.template_name,
+      updates.active !== undefined ? updates.active : cur.active,
+      id, userId
+    ]
+  )
+}
+
+async function deleteVencimentoRule(id, userId) {
+  await pool.query('DELETE FROM vencimento_rules WHERE id=$1 AND user_id=$2', [id, userId])
+}
+
+async function setVencimentoRuleLastRun(id, date, userId) {
+  await pool.query('UPDATE vencimento_rules SET last_run_date=$1 WHERE id=$2 AND user_id=$3', [date, id, userId])
+}
+
+// ── Campaign responses ────────────────────────────────────────────────────────
+
+async function trackCampaignResponse(campaignLogId, phone, userId) {
+  const { rowCount } = await pool.query(
+    `INSERT INTO campaign_responses (campaign_log_id, phone, user_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+    [campaignLogId, phone, userId]
+  )
+  if (rowCount > 0) {
+    await pool.query('UPDATE campaign_log SET responses=COALESCE(responses,0)+1 WHERE id=$1', [campaignLogId])
+  }
+}
+
+// ── Drips ─────────────────────────────────────────────────────────────────────
+
+async function getDrips(userId) {
+  const { rows } = await pool.query(
+    'SELECT id, name, steps, active, created_at as "createdAt" FROM drips WHERE user_id=$1 ORDER BY created_at',
+    [userId]
+  )
+  return rows
+}
+
+async function getDrip(id, userId) {
+  const { rows } = await pool.query('SELECT * FROM drips WHERE id=$1 AND user_id=$2', [id, userId])
+  return rows[0] || null
+}
+
+async function addDrip(d, userId) {
+  const { rows } = await pool.query(
+    `INSERT INTO drips (id, user_id, name, steps, active) VALUES ($1,$2,$3,$4,$5)
+     RETURNING id, name, steps, active, created_at as "createdAt"`,
+    [d.id, userId, d.name, JSON.stringify(d.steps || []), d.active !== false]
+  )
+  return rows[0]
+}
+
+async function updateDrip(id, updates, userId) {
+  const { rows } = await pool.query('SELECT * FROM drips WHERE id=$1 AND user_id=$2', [id, userId])
+  const cur = rows[0]; if (!cur) return
+  await pool.query(
+    'UPDATE drips SET name=$1, steps=$2, active=$3 WHERE id=$4 AND user_id=$5',
+    [
+      updates.name !== undefined ? updates.name : cur.name,
+      JSON.stringify(updates.steps !== undefined ? updates.steps : cur.steps),
+      updates.active !== undefined ? updates.active : cur.active,
+      id, userId
+    ]
+  )
+}
+
+async function deleteDrip(id, userId) {
+  await pool.query('DELETE FROM drips WHERE id=$1 AND user_id=$2', [id, userId])
+  await pool.query('DELETE FROM drip_queue WHERE drip_id=$1 AND user_id=$2', [id, userId])
+}
+
+async function getDripQueue(userId, dripId) {
+  const query = dripId
+    ? `SELECT id, drip_id as "dripId", phone, nome, step_index as "stepIndex", send_at as "sendAt", status FROM drip_queue WHERE user_id=$1 AND drip_id=$2 ORDER BY send_at`
+    : `SELECT id, drip_id as "dripId", phone, nome, step_index as "stepIndex", send_at as "sendAt", status FROM drip_queue WHERE user_id=$1 ORDER BY send_at`
+  const { rows } = await pool.query(query, dripId ? [userId, dripId] : [userId])
+  return rows
+}
+
+async function getPendingDripItems(userId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM drip_queue WHERE user_id=$1 AND status='pending' AND send_at <= NOW() ORDER BY send_at LIMIT 100`,
+    [userId]
+  )
+  return rows
+}
+
+async function addDripQueueItems(items) {
+  for (const item of items) {
+    await pool.query(
+      `INSERT INTO drip_queue (id, drip_id, user_id, phone, nome, step_index, send_at, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (id) DO NOTHING`,
+      [item.id, item.dripId, item.userId, item.phone, item.nome, item.stepIndex, item.sendAt]
+    )
+  }
+}
+
+async function updateDripItemStatus(id, status) {
+  await pool.query('UPDATE drip_queue SET status=$1 WHERE id=$2', [status, id])
+}
+
 module.exports = {
   init, ping,
-  getContacts, saveContacts, addContact, updateContact, deleteContact,
+  getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout,
   getDraft, saveDraft,
   getTemplates, addTemplate, updateTemplate, deleteTemplate,
   getAutoreplies, addAutoreply, updateAutoreply, deleteAutoreply,
-  getCampaignLog, addCampaignLog,
+  getCampaignLog, addCampaignLog, trackCampaignResponse,
   getGroups, addGroup, updateGroup, deleteGroup,
   getLidEntry, saveLidEntry,
+  getSchedules, getPendingSchedules, addSchedule, updateScheduleStatus, deleteSchedule,
+  getVencimentoRules, addVencimentoRule, updateVencimentoRule, deleteVencimentoRule, setVencimentoRuleLastRun,
+  getDrips, getDrip, addDrip, updateDrip, deleteDrip, getDripQueue, getPendingDripItems, addDripQueueItems, updateDripItemStatus,
   upsertUser, getUserByEmail, getUserByInstance, getUserById, getAllUsers, updateUser, deleteUser, registerUser,
   createSession, getSession, deleteSession
 }

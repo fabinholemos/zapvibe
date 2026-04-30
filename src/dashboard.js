@@ -218,12 +218,33 @@ async function processWebhook(data) {
   const text = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').toLowerCase().trim()
   console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
 
+  // Opt-out detection — before cooldown check so it always works
+  const OPTOUT_KEYWORDS = ['sair', 'parar', 'stop', 'cancelar', 'remover', 'descadastrar', 'nao quero', 'não quero']
+  if (OPTOUT_KEYWORDS.some(kw => text === kw || text.startsWith(kw + ' ') || text.endsWith(' ' + kw))) {
+    const allCts = await db.getContacts(userId)
+    const optoutContact = allCts.find(c => {
+      const n = c.telefone.replace(/\D/g, '')
+      return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
+    })
+    if (optoutContact) {
+      await db.setOptout(optoutContact.telefone, userId)
+      await sendWhatsapp(sendTo, 'Você foi removido da nossa lista de mensagens e não receberá mais contato. ✓', instanceName).catch(() => {})
+      console.log('[Opt-out]', phone, '| contato:', optoutContact.telefone)
+    }
+    return
+  }
+
   const lastReply = replyTracker.get(phone)
   if (lastReply && Date.now() - lastReply < REPLY_COOLDOWN) return
 
   const logs = await db.getCampaignLog(userId)
   const phoneLog = logs.slice().reverse().find(l => l.phones.includes(phone))
   const senderTemplateId = phoneLog?.templateId || null
+
+  // Track response to campaign (once per contact per campaign)
+  if (phoneLog) {
+    db.trackCampaignResponse(phoneLog.id, phone, userId).catch(() => {})
+  }
 
   const rules = (await db.getAutoreplies(userId)).filter(r => {
     if (!r.active) return false
@@ -358,12 +379,12 @@ async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI,
   const c_ = getCampaign(userId)
   c_.running = true
   c_.stop = false
-  c_.total = Math.min(contacts.length, limit)
   c_.sent = 0
   c_.failed = 0
   c_.log = []
   c_.results = []
-  const slice = contacts.slice(0, limit)
+  const slice = contacts.filter(c => !c.optout).slice(0, limit)
+  c_.total = slice.length
   const sentPhones = []
   for (let i = 0; i < slice.length; i++) {
     if (c_.stop) { c_.log.push({ t: 'warn', m: 'Campanha interrompida pelo usuário.' }); break }
@@ -404,6 +425,109 @@ async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI,
     }, userId)
   }
 }
+
+// ── Automações: crons server-side ─────────────────────────────────────────────
+
+function parseVencimentoDate(str) {
+  if (!str) return null
+  // DD/MM/YYYY
+  let m = str.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (m) return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]))
+  // DD/MM (assume current year)
+  m = str.trim().match(/^(\d{1,2})\/(\d{1,2})$/)
+  if (m) return new Date(new Date().getFullYear(), parseInt(m[2]) - 1, parseInt(m[1]))
+  // YYYY-MM-DD
+  m = str.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]))
+  return null
+}
+
+async function checkSchedules() {
+  try {
+    const users = await db.getAllUsers().catch(() => [])
+    for (const user of users) {
+      if (user.status !== 'active' && user.role !== 'admin') continue
+      const schedules = await db.getPendingSchedules(user.id).catch(() => [])
+      for (const s of schedules) {
+        await db.updateScheduleStatus(s.id, 'running')
+        let contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => !c.optout)
+        if (s.group_id) {
+          const groups = await db.getGroups(user.id).catch(() => [])
+          const grp = groups.find(g => g.id === s.group_id)
+          if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))
+        }
+        const instanceName = user.instance_name || INSTANCE
+        runCampaign(contacts, s.template, s.delay_min, s.delay_max, s.daily_limit, s.use_ai, null, s.template_id, s.template_name, user.id, instanceName)
+          .then(() => db.updateScheduleStatus(s.id, 'sent').catch(() => {}))
+          .catch(() => db.updateScheduleStatus(s.id, 'failed').catch(() => {}))
+      }
+    }
+  } catch (e) { console.error('[checkSchedules]', e.message) }
+}
+setInterval(checkSchedules, 60000)
+
+async function checkVencimentos() {
+  try {
+    const today = new Date()
+    const todayStr = today.toISOString().slice(0, 10)
+    const users = await db.getAllUsers().catch(() => [])
+    for (const user of users) {
+      if (user.status !== 'active' && user.role !== 'admin') continue
+      const rules = await db.getVencimentoRules(user.id).catch(() => [])
+      for (const rule of rules) {
+        if (!rule.active || rule.lastRunDate === todayStr) continue
+        const targetDate = new Date(today)
+        targetDate.setDate(targetDate.getDate() + parseInt(rule.daysBefore))
+        const contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => {
+          if (!c.vencimento || c.optout) return false
+          const d = parseVencimentoDate(c.vencimento)
+          if (!d) return false
+          return d.getDate() === targetDate.getDate() && d.getMonth() === targetDate.getMonth()
+        })
+        if (contacts.length) {
+          const instanceName = user.instance_name || INSTANCE
+          runCampaign(contacts, rule.templateContent, 8000, 20000, 500, false, null, rule.templateId, rule.name, user.id, instanceName)
+            .catch(e => console.error('[Vencimento]', e.message))
+        }
+        await db.setVencimentoRuleLastRun(rule.id, todayStr, user.id).catch(() => {})
+      }
+    }
+  } catch (e) { console.error('[checkVencimentos]', e.message) }
+}
+setInterval(checkVencimentos, 3600000)
+checkVencimentos() // run once at startup
+
+async function checkDrips() {
+  try {
+    const users = await db.getAllUsers().catch(() => [])
+    for (const user of users) {
+      if (user.status !== 'active' && user.role !== 'admin') continue
+      const items = await db.getPendingDripItems(user.id).catch(() => [])
+      for (const item of items) {
+        const drip = await db.getDrip(item.drip_id, user.id).catch(() => null)
+        if (!drip) { await db.updateDripItemStatus(item.id, 'skipped').catch(() => {}); continue }
+        const step = drip.steps[item.step_index]
+        if (!step) { await db.updateDripItemStatus(item.id, 'done').catch(() => {}); continue }
+        await db.updateDripItemStatus(item.id, 'running')
+        const contact = { nome: item.nome, telefone: item.phone }
+        const instanceName = user.instance_name || INSTANCE
+        try {
+          await sendWhatsapp(item.phone, applyTemplate(step.message, contact), instanceName)
+          await db.updateDripItemStatus(item.id, 'sent')
+          const nextIdx = item.step_index + 1
+          if (nextIdx < drip.steps.length) {
+            const nextStep = drip.steps[nextIdx]
+            const sendAt = new Date(Date.now() + (nextStep.delayDays || 1) * 86400000).toISOString()
+            await db.addDripQueueItems([{ id: `${Date.now()}_${item.phone}_${nextIdx}`, dripId: item.drip_id, userId: user.id, phone: item.phone, nome: item.nome, stepIndex: nextIdx, sendAt }])
+          }
+        } catch (e) {
+          await db.updateDripItemStatus(item.id, 'failed').catch(() => {})
+        }
+      }
+    }
+  } catch (e) { console.error('[checkDrips]', e.message) }
+}
+setInterval(checkDrips, 60000)
 
 // ── body parser ───────────────────────────────────────────────────────────────
 
@@ -457,11 +581,12 @@ textarea{resize:vertical}
 
   <!-- Tabs -->
   <div class="flex gap-1 bg-gray-900 p-1 rounded-xl mb-6 border border-gray-800">
-    <button onclick="tab('conn')" id="t-conn" class="tab tab-active flex-1 py-2 text-sm font-medium rounded-lg">📱 Conexão</button>
-    <button onclick="tab('contacts')" id="t-contacts" class="tab flex-1 py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white">👥 Contatos</button>
-    <button onclick="tab('campaign')" id="t-campaign" class="tab flex-1 py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white">📤 Campanha</button>
-    <button onclick="tab('auto')" id="t-auto" class="tab flex-1 py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white">🤖 Auto-respostas</button>
-    <button onclick="tab('hist')" id="t-hist" class="tab flex-1 py-2 text-sm font-medium rounded-lg text-gray-400 hover:text-white">📊 Histórico</button>
+    <button onclick="tab('conn')" id="t-conn" class="tab tab-active flex-1 py-1.5 text-xs font-medium rounded-lg">📱 Conexão</button>
+    <button onclick="tab('contacts')" id="t-contacts" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">👥 Contatos</button>
+    <button onclick="tab('campaign')" id="t-campaign" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">📤 Campanha</button>
+    <button onclick="tab('auto')" id="t-auto" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">🤖 Respostas</button>
+    <button onclick="tab('auto2')" id="t-auto2" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">⚡ Automações</button>
+    <button onclick="tab('hist')" id="t-hist" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">📊 Histórico</button>
   </div>
 
   <!-- ── TAB: Histórico ── -->
@@ -514,6 +639,86 @@ textarea{resize:vertical}
         <p>Nenhuma regra criada ainda.</p>
       </div>
     </div>
+  </div>
+
+  <!-- ── TAB: Automações ── -->
+  <div id="p-auto2" class="hidden fade space-y-6">
+
+    <!-- ── Vencimento Rules ── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-1">
+        <div>
+          <p class="text-sm font-semibold">📅 Automação por Vencimento</p>
+          <p class="text-xs text-gray-500 mt-0.5">Envia mensagem automaticamente X dias antes do campo <span class="font-mono">vencimento</span> do contato</p>
+        </div>
+        <button onclick="openVencForm()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg">+ Nova regra</button>
+      </div>
+
+      <!-- New rule form -->
+      <div id="venc-form" class="hidden mt-4 bg-gray-800 rounded-xl p-4 space-y-3">
+        <p class="text-xs font-semibold text-gray-300">Nova regra de vencimento</p>
+        <input id="vf-name" placeholder="Nome da regra (ex: Aviso de renovação)" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+        <div class="flex gap-2">
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 block mb-1">Dias antes do vencimento</label>
+            <input id="vf-days" type="number" value="3" min="0" max="365" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Mensagem (use {nome}, {vencimento}, {empresa})</label>
+          <textarea id="vf-content" rows="4" placeholder="Olá {nome}, seu serviço vence em {vencimento}. Renove agora!" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500 resize-none"></textarea>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="saveVencRule()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
+          <button onclick="closeVencForm()" class="flex-1 py-2 bg-gray-700 text-gray-300 text-sm rounded-xl">Cancelar</button>
+        </div>
+      </div>
+
+      <div id="venc-list" class="mt-4 space-y-2">
+        <p class="text-xs text-gray-600 text-center py-4">Nenhuma regra criada.</p>
+      </div>
+    </div>
+
+    <!-- ── Drip Campaigns ── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-1">
+        <div>
+          <p class="text-sm font-semibold">🔁 Sequências (Drip)</p>
+          <p class="text-xs text-gray-500 mt-0.5">Envie uma série de mensagens ao longo de dias para nutrir contatos</p>
+        </div>
+        <button onclick="openDripForm()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg">+ Nova sequência</button>
+      </div>
+
+      <!-- New drip form -->
+      <div id="drip-form" class="hidden mt-4 bg-gray-800 rounded-xl p-4 space-y-3">
+        <p class="text-xs font-semibold text-gray-300">Nova sequência</p>
+        <input id="df-name" placeholder="Nome da sequência (ex: Boas-vindas)" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+        <div id="df-steps" class="space-y-2"></div>
+        <button onclick="addDripStep()" class="w-full py-2 border border-dashed border-gray-600 text-xs text-gray-500 hover:text-gray-300 hover:border-gray-500 rounded-xl">+ Adicionar etapa</button>
+        <div class="flex gap-2">
+          <button onclick="saveDrip()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
+          <button onclick="closeDripForm()" class="flex-1 py-2 bg-gray-700 text-gray-300 text-sm rounded-xl">Cancelar</button>
+        </div>
+      </div>
+
+      <div id="drip-list" class="mt-4 space-y-2">
+        <p class="text-xs text-gray-600 text-center py-4">Nenhuma sequência criada.</p>
+      </div>
+    </div>
+
+    <!-- ── Scheduled Campaigns ── -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+      <div class="flex items-center justify-between mb-1">
+        <div>
+          <p class="text-sm font-semibold">🕐 Campanhas Agendadas</p>
+          <p class="text-xs text-gray-500 mt-0.5">Campanhas que serão disparadas automaticamente no horário definido</p>
+        </div>
+      </div>
+      <div id="sched-list" class="mt-4 space-y-2">
+        <p id="sched-empty" class="text-xs text-gray-600 text-center py-4">Nenhuma campanha agendada.</p>
+      </div>
+    </div>
+
   </div>
 
   <!-- ── TAB: Conexão ── -->
@@ -728,7 +933,7 @@ textarea{resize:vertical}
           <option value="">📋 Todos os contatos</option>
         </select>
       </div>
-      <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center justify-between mb-3">
         <div>
           <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Disparar campanha</p>
           <p id="camp-summary" class="text-sm text-gray-400">— contatos carregados</p>
@@ -736,6 +941,20 @@ textarea{resize:vertical}
         <div class="flex gap-2">
           <button onclick="startCampaign()" id="btn-start" class="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors">▶ Disparar</button>
           <button onclick="stopCampaign()" id="btn-stop" class="hidden px-5 py-2.5 bg-red-700 hover:bg-red-600 text-white font-semibold rounded-xl transition-colors">⏹ Parar</button>
+        </div>
+      </div>
+      <!-- Schedule toggle -->
+      <div class="border-t border-gray-800 pt-3 mt-1">
+        <label class="flex items-center gap-2 cursor-pointer mb-2">
+          <input type="checkbox" id="sched-toggle" onchange="toggleSchedForm()" class="w-4 h-4 rounded accent-violet-600"/>
+          <span class="text-xs text-gray-400">Agendar para depois</span>
+        </label>
+        <div id="sched-form" class="hidden flex gap-2 items-end">
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 block mb-1">Data e hora</label>
+            <input id="sched-dt" type="datetime-local" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+          </div>
+          <button onclick="scheduleCampaign()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl whitespace-nowrap">📅 Agendar</button>
         </div>
       </div>
 
@@ -906,7 +1125,7 @@ let activeGroup = null // id do grupo ativo no filtro de contatos
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 function tab(id) {
-  ['conn','contacts','campaign','auto','hist'].forEach(t => {
+  ['conn','contacts','campaign','auto','auto2','hist'].forEach(t => {
     document.getElementById('p-'+t).classList.add('hidden')
     document.getElementById('t-'+t).classList.remove('tab-active')
     document.getElementById('t-'+t).classList.add('text-gray-400')
@@ -917,6 +1136,7 @@ function tab(id) {
   if (id === 'contacts') { loadContacts(); loadGroupsUI() }
   if (id === 'campaign') { loadTemplate(); updateCampSummary(); loadGroupsForCampaign() }
   if (id === 'auto') { loadAutoList(); checkWebhookStatus() }
+  if (id === 'auto2') { loadVencimentoRules(); loadDrips(); loadScheduledList() }
   if (id === 'hist') loadHistory()
 }
 
@@ -1006,14 +1226,17 @@ function renderContacts() {
   tb.innerHTML = filtered.map((c,i) => {
     const realIdx = contacts.indexOf(c)
     const chk = selected.has(realIdx)
+    const optoutBadge = c.optout ? \`<span class="inline-flex items-center gap-1 text-xs bg-red-950 text-red-400 border border-red-800/60 px-1.5 py-0.5 rounded-md ml-1">SAIU</span>\` : ''
+    const optoutBtn = c.optout ? \`<button onclick="reincludeContact('\${esc(c.telefone)}')" title="Reincluir" class="text-red-600 hover:text-green-400 transition-colors text-xs">↩</button>\` : ''
     return \`
-    <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors \${chk?'bg-violet-950/20':''}">
-      <td class="px-4 py-2.5"><input type="checkbox" \${chk?'checked':''} onchange="toggleContact(\${realIdx},this.checked)" class="accent-violet-600"/></td>
-      <td class="px-4 py-2.5 font-medium">\${esc(c.nome)}</td>
+    <tr class="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors \${c.optout?'opacity-50':''\} \${chk?'bg-violet-950/20':''}">
+      <td class="px-4 py-2.5"><input type="checkbox" \${chk?'checked':''} \${c.optout?'disabled':''} onchange="toggleContact(\${realIdx},this.checked)" class="accent-violet-600"/></td>
+      <td class="px-4 py-2.5 font-medium">\${esc(c.nome)}\${optoutBadge}</td>
       <td class="px-4 py-2.5 font-mono text-gray-400 text-xs">\${esc(c.telefone)}</td>
       <td class="px-4 py-2.5 text-gray-400">\${esc(c.empresa||'—')}</td>
       <td class="px-4 py-2.5 text-gray-500 text-xs">\${esc(c.extra||'—')}</td>
       <td class="px-4 py-2.5 text-right flex items-center justify-end gap-2">
+        \${optoutBtn}
         <button onclick="openEditContact(\${realIdx})" class="text-gray-600 hover:text-violet-400 transition-colors text-xs">✎</button>
         <button onclick="deleteContact(\${realIdx})" class="text-gray-600 hover:text-red-400 transition-colors text-xs">✕</button>
       </td>
@@ -1744,12 +1967,17 @@ function renderHistory(history) {
     const daysLabel = daysAgo === 0 ? 'hoje' : daysAgo === 1 ? '1 dia atrás' : daysAgo + ' dias atrás'
     const contactList = (h.contacts || []).map(c => \`<li>\${esc(c.nome)} — \${esc(c.telefone)}</li>\`).join('')
     const hasContacts = (h.contacts||[]).length > 0
+    const sentCount = h.sent || h.phones?.length || 0
+    const responses = h.responses || 0
+    const respRate = sentCount > 0 ? Math.round(responses / sentCount * 100) : 0
+    const respBadge = responses > 0 ? \`<span class="text-xs text-blue-400">💬 \${responses} respostas (\${respRate}%)</span>\` : ''
     return \`<div class="px-4 py-3">
       <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
         <div class="flex items-center gap-3 flex-wrap">
           <span class="text-sm font-medium text-white">\${esc(h.templateName || 'Campanha #' + (i+1))}</span>
-          <span class="text-xs text-green-400">✔ \${h.sent || h.phones?.length || 0} enviadas</span>
+          <span class="text-xs text-green-400">✔ \${sentCount} enviadas</span>
           \${(h.failed||0) > 0 ? \`<span class="text-xs text-red-400">✘ \${h.failed} falhas</span>\` : ''}
+          \${respBadge}
           <span class="text-xs text-gray-600">\${daysLabel}</span>
         </div>
         <div class="flex items-center gap-2">
@@ -1818,6 +2046,186 @@ function clearRemarketing() {
     loadGroupsForCampaign()
   }
   updateCampSummary()
+}
+
+// ── Opt-out re-include ────────────────────────────────────────────────────────
+async function reincludeContact(telefone) {
+  await fetch(\`/api/contacts/\${encodeURIComponent(telefone)}/optout\`, { method:'DELETE' })
+  await loadContacts()
+}
+
+// ── Scheduled campaigns (campaign tab) ───────────────────────────────────────
+function toggleSchedForm() {
+  document.getElementById('sched-form').classList.toggle('hidden', !document.getElementById('sched-toggle').checked)
+}
+
+async function scheduleCampaign() {
+  const dt = document.getElementById('sched-dt').value
+  if (!dt) { alert('Escolha data e hora.'); return }
+  const scheduledAt = new Date(dt).toISOString()
+  const tpl = document.getElementById('tpl').value.trim()
+  if (!tpl) { alert('Mensagem vazia.'); return }
+  const groupId = document.getElementById('camp-group').value || ''
+  const delayMin = parseInt(document.getElementById('cfg-dmin').value) || 8000
+  const delayMax = parseInt(document.getElementById('cfg-dmax').value) || 20000
+  const dailyLimit = parseInt(document.getElementById('cfg-limit').value) || 150
+  const useAi = document.getElementById('cfg-ai').checked
+  const tplId = window._activeTplId || null
+  const tplName = window._activeTplName || 'Sem nome'
+  await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ template: tpl, templateId: tplId, templateName: tplName, groupId, scheduledAt, delayMin, delayMax, dailyLimit, useAi }) })
+  document.getElementById('sched-toggle').checked = false
+  document.getElementById('sched-form').classList.add('hidden')
+  alert('Campanha agendada!')
+  loadScheduledList()
+}
+
+async function loadScheduledList() {
+  const list = await fetch('/api/schedules').then(r=>r.json()).catch(()=>[])
+  const el = document.getElementById('sched-list')
+  if (!el) return
+  if (!list.length) { el.innerHTML='<p id="sched-empty" class="text-xs text-gray-600 text-center py-4">Nenhuma campanha agendada.</p>'; return }
+  el.innerHTML = list.map(s => {
+    const dt = new Date(s.scheduledAt)
+    const label = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})
+    const statusColor = s.status==='sent'?'text-green-400':s.status==='failed'?'text-red-400':s.status==='running'?'text-yellow-400':'text-blue-400'
+    return \`<div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2">
+      <div class="flex-1 min-w-0 mr-3">
+        <p class="text-xs font-medium truncate">\${esc(s.templateName||'Campanha')}</p>
+        <p class="text-xs text-gray-500">🕐 \${label} \${s.groupId?'· Grupo selecionado':''}</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs \${statusColor}">\${s.status}</span>
+        \${s.status==='pending'?\`<button onclick="deleteSchedule('\${s.id}')" class="text-gray-600 hover:text-red-400 text-xs">✕</button>\`:''}
+      </div>
+    </div>\`
+  }).join('')
+}
+
+async function deleteSchedule(id) {
+  await fetch(\`/api/schedules/\${id}\`, { method:'DELETE' })
+  loadScheduledList()
+}
+
+// ── Vencimento rules ──────────────────────────────────────────────────────────
+function openVencForm() { document.getElementById('venc-form').classList.remove('hidden') }
+function closeVencForm() { document.getElementById('venc-form').classList.add('hidden'); document.getElementById('vf-name').value=''; document.getElementById('vf-days').value='3'; document.getElementById('vf-content').value='' }
+
+async function saveVencRule() {
+  const name = document.getElementById('vf-name').value.trim()
+  const daysBefore = parseInt(document.getElementById('vf-days').value) || 3
+  const templateContent = document.getElementById('vf-content').value.trim()
+  if (!name || !templateContent) { alert('Preencha nome e mensagem.'); return }
+  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, templateContent }) })
+  closeVencForm()
+  loadVencimentoRules()
+}
+
+async function loadVencimentoRules() {
+  const rules = await fetch('/api/vencimento-rules').then(r=>r.json()).catch(()=>[])
+  const el = document.getElementById('venc-list')
+  if (!rules.length) { el.innerHTML='<p class="text-xs text-gray-600 text-center py-4">Nenhuma regra criada.</p>'; return }
+  el.innerHTML = rules.map(r => \`
+    <div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2.5">
+      <div class="flex-1 min-w-0 mr-3">
+        <p class="text-xs font-medium">\${esc(r.name)}</p>
+        <p class="text-xs text-gray-500">\${r.daysBefore} dia\${r.daysBefore!==1?'s':''} antes do vencimento</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" \${r.active?'checked':''} onchange="toggleVencRule('\${r.id}',this.checked)" class="w-3.5 h-3.5 accent-violet-600"/>
+          <span class="text-xs text-gray-400">Ativo</span>
+        </label>
+        <button onclick="deleteVencRule('\${r.id}')" class="text-gray-600 hover:text-red-400 text-xs ml-1">✕</button>
+      </div>
+    </div>
+  \`).join('')
+}
+
+async function toggleVencRule(id, active) {
+  await fetch(\`/api/vencimento-rules/\${id}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ active }) })
+}
+
+async function deleteVencRule(id) {
+  if (!confirm('Excluir esta regra?')) return
+  await fetch(\`/api/vencimento-rules/\${id}\`, { method:'DELETE' })
+  loadVencimentoRules()
+}
+
+// ── Drip campaigns ────────────────────────────────────────────────────────────
+let dripSteps = []
+
+function openDripForm() { dripSteps=[]; document.getElementById('df-steps').innerHTML=''; document.getElementById('drip-form').classList.remove('hidden') }
+function closeDripForm() { document.getElementById('drip-form').classList.add('hidden'); document.getElementById('df-name').value=''; dripSteps=[] }
+
+function addDripStep() {
+  const idx = dripSteps.length
+  dripSteps.push({ delayDays: idx === 0 ? 0 : 1, message: '' })
+  renderDripSteps()
+}
+
+function renderDripSteps() {
+  document.getElementById('df-steps').innerHTML = dripSteps.map((s, i) => \`
+    <div class="bg-gray-900 rounded-xl p-3 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-medium text-gray-300">Etapa \${i+1}</span>
+        <button onclick="removeDripStep(\${i})" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+      </div>
+      \${i > 0 ? \`<div class="flex items-center gap-2"><label class="text-xs text-gray-500 whitespace-nowrap">Enviar</label><input type="number" value="\${s.delayDays}" min="1" onchange="dripSteps[\${i}].delayDays=+this.value" class="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-500"/><label class="text-xs text-gray-500">dias após etapa anterior</label></div>\` : '<p class="text-xs text-gray-500">Enviado na hora do início</p>'}
+      <textarea rows="3" placeholder="Mensagem (use {nome}, {empresa}...)" onchange="dripSteps[\${i}].message=this.value" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-violet-500 resize-none">\${esc(s.message)}</textarea>
+    </div>
+  \`).join('')
+}
+
+function removeDripStep(i) { dripSteps.splice(i, 1); renderDripSteps() }
+
+async function saveDrip() {
+  const name = document.getElementById('df-name').value.trim()
+  if (!name) { alert('Digite o nome da sequência.'); return }
+  if (!dripSteps.length) { alert('Adicione ao menos uma etapa.'); return }
+  if (dripSteps.some(s => !s.message.trim())) { alert('Todas as etapas precisam de mensagem.'); return }
+  await fetch('/api/drips', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, steps: dripSteps }) })
+  closeDripForm()
+  loadDrips()
+}
+
+async function loadDrips() {
+  const drips = await fetch('/api/drips').then(r=>r.json()).catch(()=>[])
+  const el = document.getElementById('drip-list')
+  if (!drips.length) { el.innerHTML='<p class="text-xs text-gray-600 text-center py-4">Nenhuma sequência criada.</p>'; return }
+  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  el.innerHTML = drips.map(d => {
+    const steps = Array.isArray(d.steps) ? d.steps : []
+    return \`
+    <div class="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-xs font-medium">\${esc(d.name)}</p>
+          <p class="text-xs text-gray-500">\${steps.length} etapa\${steps.length!==1?'s':''}</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="startDrip('\${d.id}')" class="text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 text-white rounded-lg">▶ Iniciar</button>
+          <button onclick="deleteDrip('\${d.id}')" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+        </div>
+      </div>
+    </div>\`
+  }).join('')
+}
+
+async function startDrip(id) {
+  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  const opts = ['<option value="">Todos os contatos</option>', ...groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`)].join('')
+  const groupId = prompt(\`Iniciar sequência para qual grupo?\\n\\n\${groups.map((g,i)=>(i+1)+'. '+g.name).join('\\n')}\\n\\n(deixe vazio para todos)\\n\\nDigite o número do grupo ou deixe em branco:\`)
+  if (groupId === null) return
+  const grp = groups[parseInt(groupId)-1]
+  const body = grp ? { groupId: grp.id } : {}
+  const r = await fetch(\`/api/drips/\${id}/start\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r=>r.json())
+  alert(\`Sequência iniciada para \${r.enrolled} contatos!\`)
+}
+
+async function deleteDrip(id) {
+  if (!confirm('Excluir esta sequência e todos os agendamentos pendentes?')) return
+  await fetch(\`/api/drips/\${id}\`, { method:'DELETE' })
+  loadDrips()
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -2542,6 +2950,94 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith('/api/groups/') && method === 'DELETE') {
     const id = url.split('/')[3]
     await db.deleteGroup(id, userId)
+    json({ ok: true }); return
+  }
+
+  // Scheduled campaigns
+  if (url === '/api/schedules' && method === 'GET') {
+    json(await db.getSchedules(userId)); return
+  }
+  if (url === '/api/schedules' && method === 'POST') {
+    const body = await readBody(req)
+    if (!body.template?.trim() || !body.scheduledAt) { json({ error: 'template e scheduledAt obrigatórios' }, 400); return }
+    const s = { id: Date.now().toString(), template: body.template.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', scheduledAt: body.scheduledAt, delayMin: body.delayMin || 8000, delayMax: body.delayMax || 20000, dailyLimit: body.dailyLimit || 150, useAi: body.useAi || false }
+    json(await db.addSchedule(s, userId)); return
+  }
+  if (url.startsWith('/api/schedules/') && method === 'DELETE') {
+    await db.deleteSchedule(url.split('/')[3], userId)
+    json({ ok: true }); return
+  }
+
+  // Vencimento rules
+  if (url === '/api/vencimento-rules' && method === 'GET') {
+    json(await db.getVencimentoRules(userId)); return
+  }
+  if (url === '/api/vencimento-rules' && method === 'POST') {
+    const body = await readBody(req)
+    if (!body.name?.trim() || !body.templateContent?.trim()) { json({ error: 'name e templateContent obrigatórios' }, 400); return }
+    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', active: true }, userId)); return
+  }
+  if (url.startsWith('/api/vencimento-rules/') && method === 'PUT') {
+    const body = await readBody(req)
+    await db.updateVencimentoRule(url.split('/')[3], body, userId)
+    json({ ok: true }); return
+  }
+  if (url.startsWith('/api/vencimento-rules/') && method === 'DELETE') {
+    await db.deleteVencimentoRule(url.split('/')[3], userId)
+    json({ ok: true }); return
+  }
+
+  // Drips
+  if (url === '/api/drips' && method === 'GET') {
+    json(await db.getDrips(userId)); return
+  }
+  if (url === '/api/drips' && method === 'POST') {
+    const body = await readBody(req)
+    if (!body.name?.trim()) { json({ error: 'name obrigatório' }, 400); return }
+    json(await db.addDrip({ id: Date.now().toString(), name: body.name.trim(), steps: body.steps || [], active: true }, userId)); return
+  }
+  if (url.startsWith('/api/drips/') && !url.includes('/start') && !url.includes('/queue') && method === 'PUT') {
+    const body = await readBody(req)
+    await db.updateDrip(url.split('/')[3], body, userId)
+    json({ ok: true }); return
+  }
+  if (url.startsWith('/api/drips/') && !url.includes('/start') && !url.includes('/queue') && method === 'DELETE') {
+    await db.deleteDrip(url.split('/')[3], userId)
+    json({ ok: true }); return
+  }
+  if (url.includes('/api/drips/') && url.endsWith('/queue') && method === 'GET') {
+    const dripId = url.split('/')[3]
+    json(await db.getDripQueue(userId, dripId)); return
+  }
+  if (url.includes('/api/drips/') && url.endsWith('/start') && method === 'POST') {
+    const dripId = url.split('/')[3]
+    const body = await readBody(req)
+    const drip = await db.getDrip(dripId, userId)
+    if (!drip || !drip.steps?.length) { json({ error: 'Drip sem etapas' }, 400); return }
+    let contacts = (await db.getContacts(userId)).filter(c => !c.optout)
+    if (body.groupId) {
+      const groups = await db.getGroups(userId)
+      const grp = groups.find(g => g.id === body.groupId)
+      if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))
+    }
+    const firstStep = drip.steps[0]
+    const now = Date.now()
+    const items = contacts.map((c, i) => ({
+      id: `${now}_${c.telefone.replace(/\D/g, '')}_0`,
+      dripId, userId,
+      phone: c.telefone,
+      nome: c.nome,
+      stepIndex: 0,
+      sendAt: new Date(now + i * 2000).toISOString()
+    }))
+    await db.addDripQueueItems(items)
+    json({ ok: true, enrolled: items.length }); return
+  }
+
+  // Opt-out clear
+  if (url.startsWith('/api/contacts/') && url.endsWith('/optout') && method === 'DELETE') {
+    const phone = decodeURIComponent(url.split('/')[3])
+    await db.clearOptout(phone, userId)
     json({ ok: true }); return
   }
 
