@@ -1271,6 +1271,15 @@ function insertVar(v) {
 }
 
 function updateCampSummary() {
+  if (window._remarketingContacts) {
+    const rc = window._remarketingContacts
+    document.getElementById('camp-summary').textContent = \`\${rc.length} contatos (remarketing)\`
+    const btn = document.getElementById('btn-delete-selected')
+    if (btn) btn.classList.add('hidden')
+    const btnGrp = document.getElementById('btn-add-group')
+    if (btnGrp) btnGrp.classList.add('hidden')
+    return
+  }
   const n = selected.size > 0 ? selected.size : contacts.length
   const label = selected.size > 0 ? \`\${selected.size} selecionados de \${contacts.length}\` : \`\${contacts.length} contatos (todos)\`
   document.getElementById('camp-summary').textContent = label
@@ -1662,6 +1671,12 @@ async function loadGroupsForCampaign() {
   if (!sel) return
   sel.innerHTML = '<option value="">📋 Todos os contatos</option>' +
     groups.map(g => \`<option value="\${g.id}">📁 \${esc(g.name)} (\${g.phones.length} contatos)</option>\`).join('')
+  if (window._remarketingContacts) {
+    sel.innerHTML = \`<option value="__remarketing__">↩ Remarketing: \${window._remarketingContacts.length} contatos selecionados</option>\`
+    sel.disabled = true
+    sel.style.borderColor = 'rgb(180 83 9 / 0.6)'
+    sel.style.color = '#fbbf24'
+  }
 }
 
 function applyCampGroup() {
@@ -1778,6 +1793,14 @@ function startRemarketing(campaign) {
       </div>
       <button onclick="clearRemarketing()" class="text-xs px-2.5 py-1 bg-amber-900/60 hover:bg-amber-800 text-amber-300 rounded-lg transition-colors whitespace-nowrap">✕ Cancelar</button>
     \`
+    // Lock group selector to show remarketing source
+    const campGroup = document.getElementById('camp-group')
+    if (campGroup) {
+      campGroup.innerHTML = \`<option value="__remarketing__">↩ Remarketing: \${contacts.length} contatos selecionados</option>\`
+      campGroup.disabled = true
+      campGroup.style.borderColor = 'rgb(180 83 9 / 0.6)'
+      campGroup.style.color = '#fbbf24'
+    }
     updateCampSummary()
   }, 100)
 }
@@ -1787,6 +1810,13 @@ function clearRemarketing() {
   window._remarketingLabel = null
   const banner = document.getElementById('remarketing-banner')
   if (banner) banner.remove()
+  const campGroup = document.getElementById('camp-group')
+  if (campGroup) {
+    campGroup.disabled = false
+    campGroup.style.borderColor = ''
+    campGroup.style.color = ''
+    loadGroupsForCampaign()
+  }
   updateCampSummary()
 }
 
@@ -2595,12 +2625,14 @@ async function seedAdmin() {
   console.log(`✔ Admin configurado: ${email}`)
 }
 
+server.listen(PORT, () => {
+  console.log(`\n⚡ ZapVibe Dashboard → http://localhost:${PORT}\n`)
+  if (process.platform === 'win32') exec(`start "" "http://localhost:${PORT}"`)
+})
+
 db.init().then(seedAdmin).then(() => {
-  server.listen(PORT, () => {
-    console.log(`\n⚡ ZapVibe Dashboard → http://localhost:${PORT}\n`)
-    if (process.platform === 'win32') exec(`start "" "http://localhost:${PORT}"`)
-    setTimeout(configureWebhook, 3000)
-  })
+  console.log('✔ Banco de dados pronto')
+  setTimeout(configureWebhook, 3000)
 }).catch(err => {
   console.error('Erro ao iniciar banco de dados:', err.message)
   process.exit(1)
