@@ -2396,15 +2396,20 @@ const LANDING_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ZapVibe — Disparador Inteligente de WhatsApp com IA</title>
-<meta name="description" content="Envie mensagens personalizadas no WhatsApp com inteligência artificial. Automatize sua comunicação, dispare campanhas e responda clientes automaticamente com ZapVibe.">
-<meta name="keywords" content="disparador whatsapp, whatsapp marketing, automação whatsapp, envio em massa whatsapp, bot whatsapp, mensagens automáticas whatsapp">
+<title>ZapVibe — Disparador de WhatsApp em Massa para Empresas</title>
+<meta name="description" content="Dispare mensagens em massa no WhatsApp usando seu próprio número. Automatize campanhas, respostas e follow-ups. Sem risco de ban. Teste 7 dias grátis.">
+<meta name="keywords" content="disparador whatsapp, envio em massa whatsapp, whatsapp marketing, automação whatsapp, campanha whatsapp, disparador whatsapp sem ban, whatsapp para empresas, software whatsapp marketing">
+<meta name="robots" content="index, follow">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ZapVibe — Disparador de WhatsApp em Massa para Empresas">
+<meta property="og:description" content="Dispare mensagens em massa no WhatsApp usando seu próprio número. Automatize campanhas e responda clientes automaticamente.">
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"ZapVibe","applicationCategory":"BusinessApplication","operatingSystem":"Web","description":"Plataforma de disparos em massa e automação de mensagens no WhatsApp para empresas","offers":{"@type":"Offer","price":"0","priceCurrency":"BRL","description":"7 dias grátis"}}</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 *{font-family:'Inter',sans-serif}
 .gradient-text{background:linear-gradient(135deg,#7c3aed,#a855f7,#ec4899);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.card-hover{transition:all .2s;border:1px solid transparent}
+.card-hover{transition:all .25s;border:1px solid transparent}
 .card-hover:hover{border-color:rgb(124 58 237 / 0.4);transform:translateY(-2px)}
 .btn-wpp{background:#25D366;transition:background .2s}.btn-wpp:hover{background:#1ebe5d}
 </style>
@@ -2417,6 +2422,11 @@ const LANDING_HTML = `<!DOCTYPE html>
     <div class="flex items-center gap-2">
       <div class="w-8 h-8 rounded-xl bg-violet-600 flex items-center justify-center text-base">⚡</div>
       <span class="font-bold text-lg">ZapVibe</span>
+    </div>
+    <div class="hidden md:flex items-center gap-6 text-sm text-gray-400">
+      <a href="#como-funciona" class="hover:text-white transition-colors">Como funciona</a>
+      <a href="#features" class="hover:text-white transition-colors">Funcionalidades</a>
+      <a href="#faq" class="hover:text-white transition-colors">FAQ</a>
     </div>
     <div class="flex items-center gap-2">
       <a href="http://wa.link/k3gl1y" target="_blank" class="btn-wpp hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-medium rounded-xl">💬 Suporte</a>
@@ -2433,30 +2443,66 @@ const LANDING_HTML = `<!DOCTYPE html>
     7 dias grátis — sem cartão de crédito
   </div>
   <h1 class="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-tight mb-6">
-    Dispare mensagens no<br><span class="gradient-text">WhatsApp com IA</span>
+    Dispare mensagens em massa<br><span class="gradient-text">no WhatsApp sem complicação</span>
   </h1>
   <p class="text-gray-400 text-lg max-w-2xl mx-auto mb-10">
-    Envie campanhas personalizadas para centenas de contatos, responda automaticamente e acompanhe tudo em um painel simples. Sem complicação, sem risco de ban.
+    Use seu próprio número para enviar campanhas personalizadas para centenas de clientes, automatizar respostas e acompanhar resultados — tudo em um painel simples, sem risco de ban.
   </p>
-  <div class="flex flex-col sm:flex-row gap-3 justify-center">
-    <a href="/register" class="px-6 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Testar 7 dias grátis →</a>
-    <a href="#features" class="px-6 py-3.5 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl transition-colors text-base">Ver funcionalidades</a>
+  <div class="flex flex-col sm:flex-row gap-3 justify-center mb-8">
+    <a href="/register" class="px-8 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Testar 7 dias grátis →</a>
+    <a href="#como-funciona" class="px-8 py-3.5 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-xl transition-colors text-base">Como funciona</a>
   </div>
-  <p class="text-xs text-gray-600 mt-4">Sem cartão de crédito · Acesso liberado em minutos</p>
+  <p class="text-xs text-gray-600">Sem cartão de crédito · Acesso em minutos · Cancele quando quiser</p>
+  <div class="mt-14 grid grid-cols-3 gap-4 max-w-lg mx-auto">
+    <div class="bg-gray-900/60 border border-gray-800 rounded-2xl px-4 py-5">
+      <p class="text-2xl font-extrabold text-violet-400">150+</p>
+      <p class="text-xs text-gray-500 mt-1">msgs/dia por conta</p>
+    </div>
+    <div class="bg-gray-900/60 border border-gray-800 rounded-2xl px-4 py-5">
+      <p class="text-2xl font-extrabold text-violet-400">7 dias</p>
+      <p class="text-xs text-gray-500 mt-1">de teste grátis</p>
+    </div>
+    <div class="bg-gray-900/60 border border-gray-800 rounded-2xl px-4 py-5">
+      <p class="text-2xl font-extrabold text-violet-400">5 min</p>
+      <p class="text-xs text-gray-500 mt-1">para configurar</p>
+    </div>
+  </div>
+</section>
+
+<!-- Como funciona -->
+<section id="como-funciona" class="max-w-5xl mx-auto px-4 py-16">
+  <h2 class="text-2xl sm:text-3xl font-bold text-center mb-3">Como funciona</h2>
+  <p class="text-gray-400 text-center mb-12 max-w-lg mx-auto text-sm">Em menos de 5 minutos você está enviando sua primeira campanha.</p>
+  <div class="grid md:grid-cols-3 gap-6">
+    \${[
+      ['1','Conecte seu WhatsApp','Escaneie o QR code com seu celular. Sem número virtual, sem aprovação do Meta. Usa seu número atual.','📱'],
+      ['2','Importe seus contatos','Faça upload de uma planilha CSV ou cadastre manualmente. Organize por grupos e personalize cada mensagem.','📋'],
+      ['3','Dispare e acompanhe','Escolha o template, configure o horário e dispare. Veja em tempo real quem recebeu e quem respondeu.','🚀'],
+    ].map(([n, title, desc, icon]) => \`
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-center">
+      <div class="w-10 h-10 rounded-full bg-violet-600/20 border border-violet-600/40 flex items-center justify-center text-violet-400 font-bold text-sm mx-auto mb-4">\${n}</div>
+      <div class="text-3xl mb-3">\${icon}</div>
+      <h3 class="font-semibold mb-2">\${title}</h3>
+      <p class="text-sm text-gray-400 leading-relaxed">\${desc}</p>
+    </div>\`).join('')}
+  </div>
 </section>
 
 <!-- Features -->
 <section id="features" class="max-w-6xl mx-auto px-4 py-16">
-  <h2 class="text-2xl sm:text-3xl font-bold text-center mb-4">Tudo que você precisa para vender pelo WhatsApp</h2>
-  <p class="text-gray-400 text-center mb-12 max-w-xl mx-auto">Uma plataforma completa para escalar seu negócio com automação inteligente de mensagens.</p>
+  <h2 class="text-2xl sm:text-3xl font-bold text-center mb-3">Tudo que você precisa para vender pelo WhatsApp</h2>
+  <p class="text-gray-400 text-center mb-12 max-w-xl mx-auto text-sm">Uma plataforma completa para escalar sua comunicação sem precisar de equipe grande.</p>
   <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
     ${[
-      ['📤','Disparos em massa','Envie mensagens para centenas de contatos com delay inteligente para evitar bloqueios. CSV em segundos.'],
-      ['🤖','IA na personalização','Cada mensagem reescrita pela IA para soar natural e pessoal. Mais abertura, mais respostas.'],
-      ['💬','Auto-respostas','Configure regras automáticas por palavras-chave. Atenda leads enquanto você dorme.'],
-      ['📋','Templates prontos','Crie e salve templates para diferentes campanhas. Reutilize com 1 clique.'],
-      ['📊','Histórico detalhado','Veja quem recebeu, quando e os resultados de cada campanha em tempo real.'],
-      ['🔗','Conecte seu celular','Use seu próprio número do WhatsApp. Sem precisar de número virtual ou aprovação.'],
+      ['📤','Disparos em massa','Envie mensagens para centenas de contatos com delay inteligente entre envios. Zero risco de ban.'],
+      ['🎯','Personalização por contato','Use variáveis {nome}, {empresa} e {vencimento}. Cada mensagem parece escrita na mão.'],
+      ['💬','Auto-respostas automáticas','Configure respostas por palavra-chave. Atenda leads automaticamente, 24h por dia.'],
+      ['📅','Agendamento de campanhas','Programe para o melhor horário. Configure e esqueça — o sistema dispara sozinho.'],
+      ['📁','Mídia nas mensagens','Envie imagens, vídeos, áudios e PDFs junto com o texto. Salve mídias no template.'],
+      ['📊','Relatórios em tempo real','Acompanhe enviados, falhas e respostas de cada campanha. Decisões baseadas em dados.'],
+      ['🔄','Sequências automáticas','Crie drip campaigns com múltiplas etapas. Nutra leads automaticamente ao longo dos dias.'],
+      ['👥','Múltiplos WhatsApps','Conecte até 5 números diferentes. Ideal para times ou diferentes linhas de negócio.'],
+      ['🔔','Alertas de vencimento','Notifique clientes antes do vencimento. Reduza inadimplência sem esforço manual.'],
     ].map(([icon, title, desc]) => `
     <div class="card-hover bg-gray-900 rounded-2xl p-5">
       <div class="text-3xl mb-3">${icon}</div>
@@ -2466,13 +2512,58 @@ const LANDING_HTML = `<!DOCTYPE html>
   </div>
 </section>
 
+<!-- Para quem é -->
+<section class="max-w-5xl mx-auto px-4 py-16">
+  <h2 class="text-2xl sm:text-3xl font-bold text-center mb-3">Para quem é o ZapVibe?</h2>
+  <p class="text-gray-400 text-center mb-10 text-sm">Qualquer negócio que usa WhatsApp para se comunicar com clientes.</p>
+  <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    ${[
+      ['🛍️','Lojas e e-commerce','Promoções, recuperação de carrinho, notificações de pedido'],
+      ['🏥','Clínicas e consultórios','Lembretes de consulta, confirmações, campanhas sazonais'],
+      ['🏠','Imobiliárias','Follow-up de leads, lançamentos, aniversário de contratos'],
+      ['📚','Infoprodutores','Lançamentos, sequências de engajamento, suporte ao aluno'],
+      ['💈','Salões e estéticas','Agendamentos, promoções, fidelização de clientes'],
+      ['🏋️','Academias e studios','Renovações, horários, campanhas de retenção'],
+      ['🍕','Restaurantes e deliveries','Cardápio, promoções do dia, fidelização'],
+      ['💼','Freelancers e agências','Prospecção, follow-up de propostas, relacionamento'],
+    ].map(([icon, title, desc]) => `
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+      <div class="text-2xl mb-2">${icon}</div>
+      <h3 class="font-semibold text-sm mb-1">${title}</h3>
+      <p class="text-xs text-gray-500 leading-relaxed">${desc}</p>
+    </div>`).join('')}
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq" class="max-w-3xl mx-auto px-4 py-16">
+  <h2 class="text-2xl sm:text-3xl font-bold text-center mb-10">Perguntas frequentes</h2>
+  <div class="space-y-3">
+    ${[
+      ['Preciso de aprovação do Meta ou número especial?','Não. O ZapVibe usa seu número de WhatsApp pessoal ou comercial normal. Basta escanear o QR code com seu celular.'],
+      ['Posso tomar ban usando disparador?','O ZapVibe aplica delays automáticos entre mensagens e limite diário configurável. Seguindo boas práticas, o risco é mínimo.'],
+      ['Funciona com WhatsApp Business?','Sim, funciona com WhatsApp pessoal e WhatsApp Business.'],
+      ['Como importo meus contatos?','Basta fazer upload de um arquivo CSV. O sistema detecta o delimitador automaticamente e importa nome, telefone, empresa e outros campos.'],
+      ['O que acontece após os 7 dias de teste?','Entraremos em contato para apresentar os planos. Seus dados ficam salvos durante o período.'],
+      ['Posso conectar mais de um WhatsApp?','Sim. Dependendo do seu plano, você pode conectar até 5 números diferentes na mesma conta.'],
+    ].map(([q, a]) => `
+    <details class="bg-gray-900 border border-gray-800 rounded-2xl group">
+      <summary class="px-5 py-4 cursor-pointer text-sm font-medium flex items-center justify-between list-none select-none">
+        ${q}<span class="text-gray-500 text-lg ml-3">+</span>
+      </summary>
+      <p class="px-5 pb-4 text-sm text-gray-400 leading-relaxed">${a}</p>
+    </details>`).join('')}
+  </div>
+</section>
+
 <!-- CTA -->
 <section class="max-w-3xl mx-auto px-4 py-16 text-center">
   <div class="bg-gradient-to-br from-violet-950/60 to-purple-950/60 border border-violet-800/40 rounded-3xl p-10">
-    <h2 class="text-2xl sm:text-3xl font-bold mb-4">Comece grátis hoje mesmo</h2>
-    <p class="text-gray-400 mb-8">Crie sua conta em 1 minuto e teste por 7 dias sem pagar nada.</p>
+    <h2 class="text-2xl sm:text-3xl font-bold mb-4">Comece grátis agora</h2>
+    <p class="text-gray-400 mb-2 text-sm">Crie sua conta em 1 minuto. Sem cartão de crédito.</p>
+    <p class="text-gray-500 mb-8 text-xs">Sua primeira campanha pode sair hoje mesmo.</p>
     <a href="/register" class="inline-block px-8 py-3.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors text-base">Criar conta grátis →</a>
-    <p class="text-xs text-gray-600 mt-4">Dúvidas? <a href="http://wa.link/k3gl1y" target="_blank" class="text-green-500 hover:text-green-400">Fale com a gente no WhatsApp</a></p>
+    <p class="text-xs text-gray-600 mt-5">Dúvidas? <a href="http://wa.link/k3gl1y" target="_blank" class="text-green-500 hover:text-green-400">Fale com a gente no WhatsApp</a></p>
   </div>
 </section>
 
@@ -2483,10 +2574,18 @@ const LANDING_HTML = `<!DOCTYPE html>
 </a>
 
 <!-- Footer -->
-<footer class="border-t border-gray-800/50 py-8 text-center text-xs text-gray-600">
-  <p>© ${new Date().getFullYear()} ZapVibe. Todos os direitos reservados. ·
-    <a href="http://wa.link/k3gl1y" target="_blank" class="hover:text-gray-400">Suporte</a>
-  </p>
+<footer class="border-t border-gray-800/50 py-10 text-center text-xs text-gray-600">
+  <div class="max-w-6xl mx-auto px-4">
+    <div class="flex items-center justify-center gap-2 mb-4">
+      <div class="w-6 h-6 rounded-lg bg-violet-600 flex items-center justify-center text-sm">⚡</div>
+      <span class="font-semibold text-gray-400">ZapVibe</span>
+    </div>
+    <p class="mb-2">Plataforma de disparos e automação de mensagens no WhatsApp para empresas brasileiras.</p>
+    <p>© ${new Date().getFullYear()} ZapVibe. Todos os direitos reservados. ·
+      <a href="http://wa.link/k3gl1y" target="_blank" class="hover:text-gray-400 transition-colors">Suporte</a> ·
+      <a href="/login" class="hover:text-gray-400 transition-colors">Login</a>
+    </p>
+  </div>
 </footer>
 
 </body>
