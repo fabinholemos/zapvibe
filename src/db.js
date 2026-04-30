@@ -146,6 +146,16 @@ async function init() {
       responded_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (campaign_log_id, phone)
     );
+    CREATE TABLE IF NOT EXISTS wa_groups (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      instance_name TEXT NOT NULL,
+      jid TEXT NOT NULL,
+      name TEXT NOT NULL,
+      participants INTEGER DEFAULT 0,
+      synced_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, jid)
+    );
   `)
   // Migração segura: adiciona colunas novas se tabelas já existiam
   await pool.query(`
@@ -457,6 +467,37 @@ async function saveLidEntry(lid, jid, userId) {
     'INSERT INTO lid_map (lid, jid, user_id) VALUES ($1,$2,$3) ON CONFLICT (lid) DO UPDATE SET jid=$2',
     [lid, jid, userId]
   )
+}
+
+// ── WA Groups ─────────────────────────────────────────────────────────────────
+
+async function getWaGroups(userId, instanceName) {
+  const q = instanceName
+    ? 'SELECT jid, name, participants, instance_name FROM wa_groups WHERE user_id=$1 AND instance_name=$2 ORDER BY name'
+    : 'SELECT jid, name, participants, instance_name FROM wa_groups WHERE user_id=$1 ORDER BY name'
+  const params = instanceName ? [userId, instanceName] : [userId]
+  const { rows } = await pool.query(q, params)
+  return rows
+}
+
+async function syncWaGroups(userId, instanceName, groups) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('DELETE FROM wa_groups WHERE user_id=$1 AND instance_name=$2', [userId, instanceName])
+    for (const g of groups) {
+      await client.query(
+        'INSERT INTO wa_groups (user_id, instance_name, jid, name, participants) VALUES ($1,$2,$3,$4,$5)',
+        [userId, instanceName, g.jid, g.name || g.jid, g.participants || 0]
+      )
+    }
+    await client.query('COMMIT')
+  } catch (e) {
+    await client.query('ROLLBACK')
+    throw e
+  } finally {
+    client.release()
+  }
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -786,6 +827,7 @@ module.exports = {
   getCampaignLog, addCampaignLog, trackCampaignResponse,
   getGroups, addGroup, updateGroup, deleteGroup,
   getLidEntry, saveLidEntry,
+  getWaGroups, syncWaGroups,
   getSchedules, getPendingSchedules, addSchedule, updateScheduleStatus, deleteSchedule,
   getVencimentoRules, addVencimentoRule, updateVencimentoRule, deleteVencimentoRule, setVencimentoRuleLastRun,
   getDrips, getDrip, addDrip, updateDrip, deleteDrip, getDripQueue, getPendingDripItems, addDripQueueItems, updateDripItemStatus,

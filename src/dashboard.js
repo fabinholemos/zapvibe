@@ -939,12 +939,29 @@ textarea{resize:vertical}
       <!-- Instance selector -->
       <div class="mb-4 pb-4 border-b border-gray-800">
         <label class="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Disparar de qual WhatsApp</label>
-        <select id="camp-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+        <select id="camp-instance" onchange="if(document.getElementById('wa-group-toggle')?.checked)loadWaGroups()" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
           <option value="${userInstance}">📱 Principal (${userInstance})</option>
         </select>
       </div>
-      <!-- Group selector -->
+      <!-- WA Group mode toggle -->
       <div class="mb-4 pb-4 border-b border-gray-800">
+        <label class="flex items-center gap-2 cursor-pointer mb-3">
+          <input type="checkbox" id="wa-group-toggle" onchange="toggleWaGroupMode()" class="w-4 h-4 rounded accent-violet-600"/>
+          <span class="text-xs text-gray-400">Enviar para grupo do WhatsApp</span>
+        </label>
+        <!-- WA group picker (visible when toggle ON) -->
+        <div id="wa-group-section" class="hidden">
+          <div class="flex gap-2 items-center">
+            <select id="wa-group-select" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+              <option value="">Carregando grupos...</option>
+            </select>
+            <button onclick="reloadWaGroups()" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-xl whitespace-nowrap">↻ Atualizar</button>
+          </div>
+          <p class="text-xs text-gray-600 mt-1">Sincronize os grupos na aba Conexão clicando em 👥 Grupos de cada conta.</p>
+        </div>
+      </div>
+      <!-- Group selector (contacts) -->
+      <div id="camp-contacts-group-row" class="mb-4 pb-4 border-b border-gray-800">
         <label class="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Grupo de contatos</label>
         <select id="camp-group" onchange="applyCampGroup()" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
           <option value="">📋 Todos os contatos</option>
@@ -1219,6 +1236,7 @@ async function loadInstances() {
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
           <button onclick="connectInstance('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors">QR / Conectar</button>
+          <button onclick="syncWaGroups('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg transition-colors" title="Sincronizar grupos do WhatsApp">👥 Grupos</button>
           <button onclick="disconnectInstance('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg transition-colors">Desconectar</button>
           \${instances.length > 1 ? \`<button onclick="removeInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-red-400 text-xs px-1">✕</button>\` : ''}
         </div>
@@ -1667,11 +1685,30 @@ async function deleteSelected() {
 }
 
 async function startCampaign() {
+  const tpl = document.getElementById('tpl').value.trim()
+  if (!tpl) { alert('Mensagem vazia.'); return }
+  const selectedInstance = document.getElementById('camp-instance')?.value || ''
+
+  // WA Group mode
+  const waGroupMode = document.getElementById('wa-group-toggle')?.checked
+  if (waGroupMode) {
+    const groupJid = document.getElementById('wa-group-select')?.value
+    if (!groupJid) { alert('Selecione um grupo do WhatsApp.'); return }
+    const groupName = document.getElementById('wa-group-select')?.selectedOptions[0]?.text || groupJid
+    if (!confirm(\`Enviar mensagem para o grupo "\${groupName}"?\`)) return
+    const mediaInfo = await fetch('/api/media').then(r => r.json())
+    const r = await fetch('/api/campaign/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groupJid, template: tpl, useMedia: !!mediaInfo, instanceName: selectedInstance })
+    }).then(r => r.json())
+    if (r.error) { alert('Erro: ' + r.error); return }
+    alert(\`✅ Mensagem enviada para o grupo!\`)
+    return
+  }
+
   const state = await checkStatus()
   if (state !== 'open') { alert('WhatsApp não conectado. Conecte primeiro na aba Conexão.'); return }
   if (!contacts.length) { alert('Nenhum contato. Adicione na aba Contatos.'); return }
-  const tpl = document.getElementById('tpl').value.trim()
-  if (!tpl) { alert('Mensagem vazia.'); return }
   const remarketingContacts = window._remarketingContacts || null
   const targetContacts = remarketingContacts
     ? remarketingContacts
@@ -1691,7 +1728,6 @@ async function startCampaign() {
   document.getElementById('results-tbody').innerHTML = ''
 
   const mediaInfo = await fetch('/api/media').then(r => r.json())
-  const selectedInstance = document.getElementById('camp-instance')?.value || ''
   await fetch('/api/campaign/start', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
@@ -2070,6 +2106,51 @@ function applyCampGroup() {
   }
   updateCampSummary()
   renderContacts()
+}
+
+// ── WA Groups ─────────────────────────────────────────────────────────────────
+async function syncWaGroups(instanceName) {
+  const btn = event?.target
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Sincronizando...' }
+  try {
+    const r = await fetch(\`/api/wa-groups/sync?instance=\${encodeURIComponent(instanceName)}\`, { method: 'POST' }).then(r => r.json())
+    if (r.error) { alert('Erro: ' + r.error); return }
+    alert(\`✅ \${r.count} grupo(s) sincronizado(s) de \${instanceName}\`)
+    await loadWaGroups()
+  } catch (e) {
+    alert('Erro ao sincronizar grupos: ' + e.message)
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '👥 Grupos' }
+  }
+}
+
+async function loadWaGroups() {
+  const instanceName = document.getElementById('camp-instance')?.value || ''
+  const sel = document.getElementById('wa-group-select')
+  if (!sel) return
+  const waGroups = await fetch(\`/api/wa-groups?instance=\${encodeURIComponent(instanceName)}\`).then(r => r.json()).catch(() => [])
+  if (!waGroups.length) {
+    sel.innerHTML = '<option value="">Nenhum grupo — clique em 👥 Grupos na aba Conexão</option>'
+  } else {
+    sel.innerHTML = waGroups.map(g => \`<option value="\${esc(g.jid)}">\${esc(g.name)} (\${g.participants} membros)</option>\`).join('')
+  }
+}
+
+async function reloadWaGroups() {
+  await loadWaGroups()
+}
+
+function toggleWaGroupMode() {
+  const on = document.getElementById('wa-group-toggle')?.checked
+  document.getElementById('wa-group-section')?.classList.toggle('hidden', !on)
+  document.getElementById('camp-contacts-group-row')?.classList.toggle('hidden', on)
+  const summary = document.getElementById('camp-summary')
+  if (on) {
+    if (summary) summary.textContent = '1 mensagem para o grupo'
+    loadWaGroups()
+  } else {
+    updateCampSummary()
+  }
 }
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
@@ -3211,13 +3292,27 @@ const server = http.createServer(async (req, res) => {
     const c_ = getCampaign(userId)
     if (c_.running) { json({ error: 'Campanha já em andamento' }, 400); return }
     const body = await readBody(req)
-    const contacts = Array.isArray(body.contacts) && body.contacts.length ? body.contacts : await db.getContacts(userId)
     // Validate instanceName belongs to this user
     let campaignInstance = userInstance
     if (body.instanceName && body.instanceName !== userInstance) {
       const userInsts = await db.getUserInstances(userId)
       if (userInsts.some(i => i.instanceName === body.instanceName)) campaignInstance = body.instanceName
     }
+    // WA Group mode: send single message to group JID
+    if (body.groupJid) {
+      const media = body.useMedia ? mediaStore.get(userId) : null
+      try {
+        if (media) {
+          await sendWhatsappMedia(body.groupJid, body.template, media, campaignInstance)
+        } else {
+          await sendWhatsapp(body.groupJid, body.template, campaignInstance)
+        }
+      } catch (e) {
+        json({ error: 'Falha ao enviar para o grupo: ' + e.message }, 502); return
+      }
+      json({ ok: true, groupMode: true }); return
+    }
+    const contacts = Array.isArray(body.contacts) && body.contacts.length ? body.contacts : await db.getContacts(userId)
     runCampaign(contacts, body.template, body.delayMin, body.delayMax, body.limit, body.useAI, body.useMedia ? mediaStore.get(userId) : null, body.templateId, body.templateName, userId, campaignInstance)
     json({ ok: true }); return
   }
@@ -3260,6 +3355,29 @@ const server = http.createServer(async (req, res) => {
     const id = url.split('/')[3]
     await db.deleteGroup(id, userId)
     json({ ok: true }); return
+  }
+
+  // WA Groups
+  if (url === '/api/wa-groups' && method === 'GET') {
+    const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || null
+    json(await db.getWaGroups(userId, instanceName)); return
+  }
+
+  if (url.startsWith('/api/wa-groups/sync') && method === 'POST') {
+    const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || userInstance
+    let raw
+    try {
+      raw = await fetchApi(`/group/fetchAllGroups/${instanceName}?getParticipants=false`, 'GET')
+    } catch (e) {
+      json({ error: 'Falha ao buscar grupos da Evolution API: ' + e.message }, 502); return
+    }
+    const groups = (Array.isArray(raw) ? raw : []).map(g => ({
+      jid: g.id,
+      name: g.subject || g.id,
+      participants: g.size || 0
+    }))
+    await db.syncWaGroups(userId, instanceName, groups)
+    json({ ok: true, count: groups.length, groups }); return
   }
 
   // Scheduled campaigns
