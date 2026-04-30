@@ -3366,15 +3366,31 @@ const server = http.createServer(async (req, res) => {
 
   if (url.startsWith('/api/wa-groups/sync') && method === 'POST') {
     const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || userInstance
+    // Raw call to capture status + body for debugging
+    const rawResult = await new Promise(resolve => {
+      const u = new URL(API_URL + `/group/fetchAllGroups/${instanceName}?getParticipants=false`)
+      const isHttps = u.protocol === 'https:'
+      const transport = isHttps ? require('https') : require('http')
+      const req2 = (isHttps ? require('https') : require('http')).request({
+        hostname: u.hostname, port: u.port || (isHttps ? 443 : 80),
+        path: u.pathname + u.search, method: 'GET',
+        headers: { apikey: API_KEY, 'Content-Type': 'application/json' }
+      }, res2 => {
+        let d = ''
+        res2.on('data', c => d += c)
+        res2.on('end', () => resolve({ status: res2.statusCode, body: d }))
+      })
+      req2.setTimeout(30000, () => { req2.destroy(); resolve({ status: 0, body: 'timeout' }) })
+      req2.on('error', e => resolve({ status: 0, body: e.message }))
+      req2.end()
+    })
+    console.log(`[wa-groups sync] instance=${instanceName} status=${rawResult.status} body=${rawResult.body.slice(0, 500)}`)
+    if (rawResult.status === 0) { json({ error: rawResult.body }, 502); return }
     let raw
-    try {
-      raw = await fetchApi(`/group/fetchAllGroups/${instanceName}?getParticipants=false`, 'GET', null, 30000)
-    } catch (e) {
-      json({ error: 'Falha ao buscar grupos da Evolution API: ' + e.message }, 502); return
-    }
+    try { raw = JSON.parse(rawResult.body) } catch { raw = null }
     const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.groups) ? raw.groups : [])
     if (!list.length) {
-      json({ ok: true, count: 0, groups: [], debug: typeof raw === 'object' ? JSON.stringify(raw).slice(0, 300) : String(raw) }); return
+      json({ ok: true, count: 0, groups: [], debug: `status=${rawResult.status} body=${rawResult.body.slice(0, 300)}` }); return
     }
     const groups = list.map(g => ({
       jid: g.id || g.jid,
