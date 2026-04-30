@@ -2474,17 +2474,17 @@ const LANDING_HTML = `<!DOCTYPE html>
   <h2 class="text-2xl sm:text-3xl font-bold text-center mb-3">Como funciona</h2>
   <p class="text-gray-400 text-center mb-12 max-w-lg mx-auto text-sm">Em menos de 5 minutos você está enviando sua primeira campanha.</p>
   <div class="grid md:grid-cols-3 gap-6">
-    \${[
+    ${[
       ['1','Conecte seu WhatsApp','Escaneie o QR code com seu celular. Sem número virtual, sem aprovação do Meta. Usa seu número atual.','📱'],
       ['2','Importe seus contatos','Faça upload de uma planilha CSV ou cadastre manualmente. Organize por grupos e personalize cada mensagem.','📋'],
       ['3','Dispare e acompanhe','Escolha o template, configure o horário e dispare. Veja em tempo real quem recebeu e quem respondeu.','🚀'],
-    ].map(([n, title, desc, icon]) => \`
+    ].map(([n, title, desc, icon]) => `
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-center">
-      <div class="w-10 h-10 rounded-full bg-violet-600/20 border border-violet-600/40 flex items-center justify-center text-violet-400 font-bold text-sm mx-auto mb-4">\${n}</div>
-      <div class="text-3xl mb-3">\${icon}</div>
-      <h3 class="font-semibold mb-2">\${title}</h3>
-      <p class="text-sm text-gray-400 leading-relaxed">\${desc}</p>
-    </div>\`).join('')}
+      <div class="w-10 h-10 rounded-full bg-violet-600/20 border border-violet-600/40 flex items-center justify-center text-violet-400 font-bold text-sm mx-auto mb-4">${n}</div>
+      <div class="text-3xl mb-3">${icon}</div>
+      <h3 class="font-semibold mb-2">${title}</h3>
+      <p class="text-sm text-gray-400 leading-relaxed">${desc}</p>
+    </div>`).join('')}
   </div>
 </section>
 
