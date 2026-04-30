@@ -325,6 +325,7 @@ function fetchApi(urlPath, method, body) {
       res.on('data', c => d += c)
       res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({}) } })
     })
+    req.setTimeout(15000, () => { req.destroy(); reject(new Error('Evolution API timeout')) })
     req.on('error', reject)
     if (body) req.write(JSON.stringify(body))
     req.end()
@@ -2306,6 +2307,7 @@ async function deleteDrip(id) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 checkStatus()
+loadInstances()
 setInterval(checkStatus, 8000)
 </script>
 </body>
@@ -2703,10 +2705,12 @@ const server = http.createServer(async (req, res) => {
   const method = req.method
 
   const json = (data, code = 200) => {
+    if (res.headersSent) return
     res.writeHead(code, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify(data))
   }
 
+  const handleRequest = async () => {
   if (url === '/favicon.ico') { res.writeHead(204); res.end(); return }
 
   if (url === '/ping') {
@@ -3258,6 +3262,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   res.writeHead(404); res.end('Not found')
+  } // end handleRequest
+
+  handleRequest().catch(e => {
+    console.error('[HTTP] Unhandled error:', e.message)
+    if (!res.headersSent) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Internal server error' })) }
+  })
 })
 
 async function seedAdmin() {
