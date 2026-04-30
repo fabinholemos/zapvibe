@@ -3334,6 +3334,15 @@ const server = http.createServer(async (req, res) => {
     json({ error: 'Acesso negado' }, 403); return
   }
 
+  if (url === '/api/admin/test-email' && method === 'POST') {
+    try {
+      await notifyAdminNewUser('Teste Manual', 'teste@exemplo.com', '11999999999')
+      json({ ok: true, msg: 'Email enviado com sucesso' }); return
+    } catch (e) {
+      json({ error: e.message }, 500); return
+    }
+  }
+
   if (url === '/api/admin/users' && method === 'GET') {
     json(await db.getAllUsers()); return
   }
@@ -3418,6 +3427,7 @@ async function seedAdmin() {
 
 server.listen(PORT, () => {
   console.log(`\n⚡ ZapVibe Dashboard → http://localhost:${PORT}\n`)
+  console.log(`📧 Email notify: ${process.env.SMTP_PASS ? 'CONFIGURADO' : 'NÃO CONFIGURADO (SMTP_PASS ausente)'}`)
   if (process.platform === 'win32') exec(`start "" "http://localhost:${PORT}"`)
 })
 
