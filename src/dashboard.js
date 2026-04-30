@@ -190,8 +190,10 @@ async function configureWebhookForInstance(instanceName) {
 async function configureWebhook() {
   const users = await db.getAllUsers().catch(() => [])
   for (const u of users) {
-    if (u.instance_name && u.status === 'active') {
-      await configureWebhookForInstance(u.instance_name).catch(() => {})
+    if (u.status !== 'active' && u.role !== 'admin') continue
+    const instances = await db.getUserInstances(u.id).catch(() => [])
+    for (const inst of instances) {
+      await configureWebhookForInstance(inst.instanceName).catch(() => {})
     }
   }
 }
@@ -723,35 +725,30 @@ textarea{resize:vertical}
 
   <!-- ── TAB: Conexão ── -->
   <div id="p-conn" class="fade">
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-        <p class="text-xs text-gray-500 uppercase tracking-wider mb-3">Status da instância</p>
-        <div class="flex items-center gap-3 mb-4">
-          <span id="c-dot" class="w-3 h-3 rounded-full bg-gray-600"></span>
-          <span id="c-state" class="text-lg font-semibold text-gray-300">Verificando...</span>
-        </div>
-        <p class="text-xs text-gray-500 mb-1">Instância</p>
-        <p class="text-sm font-mono text-violet-400 mb-4">${userInstance}</p>
-        <div class="flex gap-2">
-          <button onclick="doConnect()" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Conectar</button>
-          <button onclick="doDisconnect()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-xl transition-colors">Desconectar</button>
-        </div>
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <p class="text-sm text-gray-400">Gerencie suas contas WhatsApp conectadas.</p>
+        <p id="inst-quota" class="text-xs text-gray-600 mt-0.5">Carregando...</p>
       </div>
-      <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 flex flex-col items-center justify-center min-h-48">
-        <div id="qr-wrap" class="hidden flex-col items-center gap-3">
-          <div class="bg-white p-3 rounded-xl"><img id="qr-img" src="" class="w-48 h-48 object-contain"/></div>
-          <p class="text-xs text-gray-400">Escaneie com o WhatsApp</p>
-          <p class="text-xs text-gray-600 text-center">Celular → 3 pontos → Aparelhos conectados → Conectar</p>
+      <button onclick="addInstance()" id="btn-add-inst" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors hidden">+ Adicionar WhatsApp</button>
+    </div>
+
+    <!-- Instance list -->
+    <div id="inst-list" class="space-y-3"></div>
+
+    <!-- QR Modal -->
+    <div id="qr-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 fade text-center">
+        <p class="text-sm font-semibold mb-1" id="qr-modal-title">Conectar WhatsApp</p>
+        <p class="text-xs text-gray-500 mb-4">Escaneie o QR Code com seu celular</p>
+        <div id="qr-modal-content" class="flex justify-center mb-4">
+          <div class="animate-pulse bg-gray-800 w-48 h-48 rounded-xl flex items-center justify-center">
+            <span class="text-gray-600 text-xs">Gerando QR...</span>
+          </div>
         </div>
-        <div id="qr-connected" class="hidden flex-col items-center gap-2">
-          <div class="w-16 h-16 rounded-full bg-green-900 border-2 border-green-500 flex items-center justify-center text-3xl pulse-g">✓</div>
-          <p class="text-green-400 font-semibold">WhatsApp Conectado</p>
-          <p class="text-xs text-gray-500">Pronto para disparos</p>
-        </div>
-        <div id="qr-idle" class="flex-col items-center gap-2 text-center">
-          <p class="text-4xl mb-2">📵</p>
-          <p class="text-sm text-gray-400">Clique em Conectar para gerar o QR Code</p>
-        </div>
+        <p class="text-xs text-gray-600 mb-4">Celular → 3 pontos → Aparelhos conectados → Conectar</p>
+        <button onclick="closeQrModal()" class="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-xl">Fechar</button>
       </div>
     </div>
   </div>
@@ -926,6 +923,13 @@ textarea{resize:vertical}
 
     <!-- Campaign controls -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-5 mb-4">
+      <!-- Instance selector -->
+      <div class="mb-4 pb-4 border-b border-gray-800">
+        <label class="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Disparar de qual WhatsApp</label>
+        <select id="camp-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+          <option value="${userInstance}">📱 Principal (${userInstance})</option>
+        </select>
+      </div>
       <!-- Group selector -->
       <div class="mb-4 pb-4 border-b border-gray-800">
         <label class="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Grupo de contatos</label>
@@ -1133,8 +1137,9 @@ function tab(id) {
   document.getElementById('p-'+id).classList.remove('hidden')
   document.getElementById('t-'+id).classList.add('tab-active')
   document.getElementById('t-'+id).classList.remove('text-gray-400')
+  if (id === 'conn') loadInstances()
   if (id === 'contacts') { loadContacts(); loadGroupsUI() }
-  if (id === 'campaign') { loadTemplate(); updateCampSummary(); loadGroupsForCampaign() }
+  if (id === 'campaign') { loadTemplate(); updateCampSummary(); loadGroupsForCampaign(); loadInstances() }
   if (id === 'auto') { loadAutoList(); checkWebhookStatus() }
   if (id === 'auto2') { loadVencimentoRules(); loadDrips(); loadScheduledList() }
   if (id === 'hist') loadHistory()
@@ -1145,51 +1150,120 @@ async function checkStatus() {
   try {
     const r = await fetch('/api/status').then(r=>r.json())
     const s = r?.instance?.state || 'close'
-    setConnState(s)
     document.getElementById('hd-dot').className = s==='open'?'w-2 h-2 rounded-full bg-green-500':'w-2 h-2 rounded-full bg-gray-600'
     document.getElementById('hd-txt').textContent = s==='open'?'Conectado':'Desconectado'
     return s
   } catch { return 'error' }
 }
 
-function setConnState(s) {
-  const dot = document.getElementById('c-dot')
-  const state = document.getElementById('c-state')
-  const qrW = document.getElementById('qr-wrap')
-  const qrC = document.getElementById('qr-connected')
-  const qrI = document.getElementById('qr-idle')
-  if (s === 'open') {
-    dot.className='w-3 h-3 rounded-full bg-green-500'
-    state.textContent='Conectado'; state.className='text-lg font-semibold text-green-400'
-    qrW.classList.add('hidden'); qrC.classList.remove('hidden'); qrI.classList.add('hidden')
-    qrC.classList.add('flex')
+// ── Multi-instance connection tab ─────────────────────────────────────────────
+
+async function loadInstances() {
+  const [instances, me] = await Promise.all([
+    fetch('/api/instances').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/me').then(r=>r.json()).catch(()=>({}))
+  ])
+  const maxInst = me.max_instances || 1
+  const quota = document.getElementById('inst-quota')
+  if (quota) quota.textContent = \`\${instances.length} de \${maxInst} instância\${maxInst!==1?'s':''} ativas no seu plano\`
+  const addBtn = document.getElementById('btn-add-inst')
+  if (addBtn) addBtn.classList.toggle('hidden', instances.length >= maxInst)
+
+  // Populate campaign instance selector
+  const campInst = document.getElementById('camp-instance')
+  if (campInst && instances.length > 0) {
+    campInst.innerHTML = instances.map(i => \`<option value="\${esc(i.instanceName)}">📱 \${esc(i.label||i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
+  }
+
+  const list = document.getElementById('inst-list')
+  if (!list) return
+  if (!instances.length) {
+    list.innerHTML = '<p class="text-xs text-gray-600 text-center py-8">Nenhuma instância configurada.</p>'
+    return
+  }
+
+  // Render each instance card, fetch status in parallel
+  list.innerHTML = instances.map(inst => \`
+    <div id="ic-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}" class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <span class="w-3 h-3 rounded-full bg-gray-600 flex-shrink-0" id="dot-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}"></span>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium" id="lbl-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}">\${esc(inst.label||'WhatsApp')}</span>
+              <button onclick="renameInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-violet-400 text-xs">✎</button>
+            </div>
+            <p class="text-xs font-mono text-gray-500">\${esc(inst.instanceName)}</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <button onclick="connectInstance('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors">QR / Conectar</button>
+          <button onclick="disconnectInstance('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg transition-colors">Desconectar</button>
+          \${instances.length > 1 ? \`<button onclick="removeInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-red-400 text-xs px-1">✕</button>\` : ''}
+        </div>
+      </div>
+    </div>
+  \`).join('')
+
+  // Fetch status for each instance
+  for (const inst of instances) {
+    const safeId = inst.instanceName.replace(/[^a-z0-9]/gi,'_')
+    fetch(\`/api/instances/\${encodeURIComponent(inst.instanceName)}/status\`)
+      .then(r=>r.json())
+      .then(r => {
+        const state = r?.instance?.state || 'close'
+        const dot = document.getElementById('dot-' + safeId)
+        if (dot) dot.className = \`w-3 h-3 rounded-full flex-shrink-0 \${state==='open'?'bg-green-500 pulse-g':'bg-gray-600'}\`
+      }).catch(()=>{})
+  }
+}
+
+async function addInstance() {
+  const label = prompt('Nome desta conta WhatsApp (ex: Vendas, Suporte, Marketing):')
+  if (!label?.trim()) return
+  const r = await fetch('/api/instances', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label: label.trim() }) }).then(r=>r.json())
+  if (r.error) { alert(r.error); return }
+  loadInstances()
+}
+
+async function renameInstance(instanceName) {
+  const safeId = instanceName.replace(/[^a-z0-9]/gi,'_')
+  const cur = document.getElementById('lbl-' + safeId)?.textContent || ''
+  const label = prompt('Novo nome para esta conta:', cur)
+  if (!label?.trim() || label === cur) return
+  await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ label: label.trim() }) })
+  loadInstances()
+}
+
+async function connectInstance(instanceName) {
+  const modal = document.getElementById('qr-modal')
+  const content = document.getElementById('qr-modal-content')
+  const title = document.getElementById('qr-modal-title')
+  if (title) title.textContent = \`Conectar: \${instanceName}\`
+  content.innerHTML = '<div class="animate-pulse bg-gray-800 w-48 h-48 rounded-xl flex items-center justify-center"><span class="text-gray-600 text-xs">Gerando QR...</span></div>'
+  modal.classList.remove('hidden')
+  const r = await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/connect\`, {method:'POST'}).then(r=>r.json())
+  if (r.qr) {
+    content.innerHTML = \`<div class="bg-white p-3 rounded-xl"><img src="\${r.qr}" class="w-48 h-48 object-contain"/></div>\`
   } else {
-    dot.className='w-3 h-3 rounded-full bg-gray-600'
-    state.textContent=s||'Desconectado'; state.className='text-lg font-semibold text-gray-300'
-    qrC.classList.add('hidden'); qrC.classList.remove('flex')
+    content.innerHTML = '<p class="text-sm text-gray-400 py-8">QR não disponível. Tente novamente.</p>'
   }
+  setTimeout(loadInstances, 15000)
 }
 
-async function doConnect() {
-  document.getElementById('qr-idle').classList.add('hidden')
-  document.getElementById('qr-idle').classList.remove('flex')
-  const r = await fetch('/api/connect', {method:'POST'}).then(r=>r.json())
-  const qrBase64 = r.qrcode?.base64 || r.base64
-  if (qrBase64) {
-    document.getElementById('qr-img').src = qrBase64
-    document.getElementById('qr-wrap').classList.remove('hidden')
-    document.getElementById('qr-wrap').classList.add('flex')
-  }
+function closeQrModal() { document.getElementById('qr-modal').classList.add('hidden'); loadInstances() }
+
+async function disconnectInstance(instanceName) {
+  if (!confirm(\`Desconectar \${instanceName}?\`)) return
+  await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/disconnect\`, {method:'POST'})
+  loadInstances()
 }
 
-async function doDisconnect() {
-  await fetch('/api/disconnect', {method:'POST'})
-  document.getElementById('qr-wrap').classList.add('hidden')
-  document.getElementById('qr-wrap').classList.remove('flex')
-  document.getElementById('qr-connected').classList.add('hidden')
-  document.getElementById('qr-idle').classList.remove('hidden')
-  document.getElementById('qr-idle').classList.add('flex')
-  setConnState('close')
+async function removeInstance(instanceName) {
+  if (!confirm(\`Remover a instância \${instanceName}? Isso a desconectará permanentemente.\`)) return
+  const r = await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}\`, {method:'DELETE'}).then(r=>r.json())
+  if (r.error) { alert(r.error); return }
+  loadInstances()
 }
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
@@ -1550,6 +1624,7 @@ async function startCampaign() {
   document.getElementById('results-tbody').innerHTML = ''
 
   const mediaInfo = await fetch('/api/media').then(r => r.json())
+  const selectedInstance = document.getElementById('camp-instance')?.value || ''
   await fetch('/api/campaign/start', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
@@ -1561,7 +1636,8 @@ async function startCampaign() {
       useAI: document.getElementById('cfg-ai').checked,
       useMedia: !!mediaInfo,
       templateId: window._activeTplId || null,
-      templateName: window._activeTplName || null
+      templateName: window._activeTplName || null,
+      instanceName: selectedInstance
     })
   })
   if (remarketingContacts) clearRemarketing()
@@ -2533,6 +2609,12 @@ async function loadUsers() {
         <div class="flex items-center gap-1.5 flex-wrap justify-end">
           <span class="text-xs">\${trialLabel(u)}</span>
           <button onclick="openDaysModal(\${u.id}, '\${esc(u.email)}')" class="text-xs px-2 py-1 bg-gray-800 hover:bg-violet-700/60 text-gray-300 rounded-lg transition-colors">⏱ Dias</button>
+          <div class="flex items-center gap-1">
+            <span class="text-xs text-gray-500">📱</span>
+            <select onchange="setMaxInstances(\${u.id},this.value)" title="Máx. instâncias WhatsApp" class="text-xs bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 focus:outline-none">
+              \${[1,2,3,4,5].map(n=>\`<option value="\${n}" \${(u.max_instances||1)===n?'selected':''}>\${n} zap\${n!==1?'s':''}</option>\`).join('')}
+            </select>
+          </div>
           <select onchange="setStatus(\${u.id},this.value)" class="text-xs bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 focus:outline-none">
             \${['pending','active','blocked'].map(s=>\`<option value="\${s}" \${u.status===s?'selected':''}>\${s==='pending'?'Pendente':s==='active'?'Ativo':'Bloqueado'}</option>\`).join('')}
           </select>
@@ -2545,6 +2627,10 @@ async function loadUsers() {
 async function setStatus(id, status) {
   await fetch(\`/api/admin/users/\${id}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ status }) })
   loadUsers()
+}
+
+async function setMaxInstances(id, max_instances) {
+  await fetch(\`/api/admin/users/\${id}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ max_instances: parseInt(max_instances) }) })
 }
 
 async function deleteUser(id, email) {
@@ -2737,6 +2823,11 @@ const server = http.createServer(async (req, res) => {
     res.end(getAppHTML(authUser.email, isAdmin, userInstance)); return
   }
 
+  // Current user info
+  if (url === '/api/me' && method === 'GET') {
+    json({ id: userId, email: authUser.email, max_instances: authUser.max_instances || 1, role: authUser.role }); return
+  }
+
   // Connection
   if (url === '/api/status') {
     try { json(await fetchApi(`/instance/connectionState/${userInstance}`, 'GET')) }
@@ -2909,7 +3000,13 @@ const server = http.createServer(async (req, res) => {
     if (c_.running) { json({ error: 'Campanha já em andamento' }, 400); return }
     const body = await readBody(req)
     const contacts = Array.isArray(body.contacts) && body.contacts.length ? body.contacts : await db.getContacts(userId)
-    runCampaign(contacts, body.template, body.delayMin, body.delayMax, body.limit, body.useAI, body.useMedia ? mediaStore.get(userId) : null, body.templateId, body.templateName, userId, userInstance)
+    // Validate instanceName belongs to this user
+    let campaignInstance = userInstance
+    if (body.instanceName && body.instanceName !== userInstance) {
+      const userInsts = await db.getUserInstances(userId)
+      if (userInsts.some(i => i.instanceName === body.instanceName)) campaignInstance = body.instanceName
+    }
+    runCampaign(contacts, body.template, body.delayMin, body.delayMax, body.limit, body.useAI, body.useMedia ? mediaStore.get(userId) : null, body.templateId, body.templateName, userId, campaignInstance)
     json({ ok: true }); return
   }
 
@@ -3041,6 +3138,66 @@ const server = http.createServer(async (req, res) => {
     json({ ok: true }); return
   }
 
+  // ── Instâncias WhatsApp ─────────────────────────────────────────────────────
+  if (url === '/api/instances' && method === 'GET') {
+    json(await db.getUserInstances(userId)); return
+  }
+
+  if (url === '/api/instances' && method === 'POST') {
+    const body = await readBody(req)
+    const maxInst = authUser.max_instances || 1
+    const current = await db.countUserInstances(userId)
+    if (current >= maxInst) { json({ error: `Limite de ${maxInst} instância${maxInst !== 1 ? 's' : ''} atingido. Contate o suporte para ampliar seu plano.` }, 400); return }
+    const instanceName = userInstance + 'x' + Date.now().toString(36).slice(-4)
+    await fetchApi('/instance/create', 'POST', { instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(() => {})
+    const inst = await db.addUserInstance(userId, instanceName, body.label || `WhatsApp ${current + 1}`)
+    await configureWebhookForInstance(instanceName).catch(() => {})
+    json(inst); return
+  }
+
+  if (url.startsWith('/api/instances/') && method === 'PUT' && url.split('/').length === 4) {
+    const instName = decodeURIComponent(url.split('/')[3])
+    const body = await readBody(req)
+    await db.updateUserInstanceLabel(userId, instName, body.label || '')
+    json({ ok: true }); return
+  }
+
+  if (url.startsWith('/api/instances/') && method === 'DELETE' && url.split('/').length === 4) {
+    const instName = decodeURIComponent(url.split('/')[3])
+    const instances = await db.getUserInstances(userId)
+    if (instances.length <= 1) { json({ error: 'Não é possível remover a única instância.' }, 400); return }
+    await fetchApi(`/instance/delete/${instName}`, 'DELETE').catch(() => {})
+    await db.deleteUserInstance(userId, instName)
+    json({ ok: true }); return
+  }
+
+  if (url.startsWith('/api/instances/') && url.endsWith('/connect') && method === 'POST') {
+    const instName = decodeURIComponent(url.split('/')[3])
+    try {
+      await fetchApi('/instance/create', 'POST', { instanceName: instName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(() => {})
+      let result = {}
+      for (let i = 0; i < 6; i++) {
+        await sleep(3000)
+        result = await fetchApi(`/instance/connect/${instName}`, 'GET').catch(() => ({}))
+        if (result.qrcode?.base64 || result.base64) break
+      }
+      json({ qr: result.qrcode?.base64 || result.base64 || null }); return
+    } catch (e) { json({ error: e.message }, 500); return }
+  }
+
+  if (url.startsWith('/api/instances/') && url.endsWith('/disconnect') && method === 'POST') {
+    const instName = decodeURIComponent(url.split('/')[3])
+    await fetchApi(`/instance/logout/${instName}`, 'DELETE').catch(() => {})
+    json({ ok: true }); return
+  }
+
+  if (url.startsWith('/api/instances/') && url.endsWith('/status') && method === 'GET') {
+    const instName = decodeURIComponent(url.split('/')[3])
+    try { json(await fetchApi(`/instance/connectionState/${instName}`, 'GET')) }
+    catch (e) { json({ instance: { state: 'close' } }) }
+    return
+  }
+
   // Admin routes
   if (url.startsWith('/api/admin/') && !isAdmin) {
     json({ error: 'Acesso negado' }, 403); return
@@ -3076,6 +3233,7 @@ const server = http.createServer(async (req, res) => {
     if (body.status !== undefined) updates.status = body.status
     if (body.role !== undefined) updates.role = body.role
     if (body.password) updates.password_hash = await hashPassword(body.password)
+    if (body.max_instances !== undefined) updates.max_instances = Math.min(5, Math.max(1, parseInt(body.max_instances) || 1))
     if (body.trial_days !== undefined) {
       if (body.trial_days === 0 || body.trial_days === null) {
         updates.trial_ends_at = null

@@ -86,6 +86,13 @@ async function init() {
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       content TEXT DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS user_instances (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      instance_name TEXT UNIQUE NOT NULL,
+      label TEXT DEFAULT 'Principal',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS scheduled_campaigns (
       id TEXT PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -150,6 +157,7 @@ async function init() {
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS vencimento TEXT DEFAULT '';
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS optout BOOLEAN DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS max_instances INTEGER DEFAULT 1;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
@@ -174,6 +182,14 @@ async function init() {
         UPDATE lid_map SET user_id=admin_id WHERE user_id IS NULL;
       END IF;
     END $$;
+  `).catch(() => {})
+
+  // Migra instance_name existente de users → user_instances
+  await pool.query(`
+    INSERT INTO user_instances (id, user_id, instance_name, label)
+    SELECT 'primary_' || id, id, instance_name, 'Principal'
+    FROM users WHERE instance_name IS NOT NULL
+    ON CONFLICT (instance_name) DO NOTHING
   `).catch(() => {})
 }
 
@@ -439,7 +455,13 @@ async function getUserByEmail(email) {
 }
 
 async function getUserByInstance(instanceName) {
-  const { rows } = await pool.query('SELECT * FROM users WHERE instance_name=$1', [instanceName])
+  const { rows } = await pool.query(
+    `SELECT u.* FROM users u
+     LEFT JOIN user_instances ui ON u.id = ui.user_id AND ui.instance_name = $1
+     WHERE u.instance_name = $1 OR ui.instance_name = $1
+     LIMIT 1`,
+    [instanceName]
+  )
   return rows[0] || null
 }
 
@@ -450,7 +472,7 @@ async function getUserById(id) {
 
 async function getAllUsers() {
   const { rows } = await pool.query(
-    'SELECT id, email, name, phone, role, status, instance_name, trial_ends_at, created_at FROM users ORDER BY created_at'
+    'SELECT id, email, name, phone, role, status, instance_name, trial_ends_at, max_instances, created_at FROM users ORDER BY created_at'
   )
   return rows
 }
@@ -462,12 +484,17 @@ async function registerUser(name, email, phone, passwordHash) {
     [name, email, phone, passwordHash]
   )
   const id = rows[0].id
-  await pool.query('UPDATE users SET instance_name=$1 WHERE id=$2', ['zv' + id, id])
+  const instanceName = 'zv' + id
+  await pool.query('UPDATE users SET instance_name=$1 WHERE id=$2', [instanceName, id])
+  await pool.query(
+    `INSERT INTO user_instances (id, user_id, instance_name, label) VALUES ($1,$2,$3,'Principal') ON CONFLICT DO NOTHING`,
+    ['primary_' + id, id, instanceName]
+  )
   return id
 }
 
 async function updateUser(id, updates) {
-  const allowed = ['status', 'role', 'instance_name', 'password_hash', 'trial_ends_at', 'name', 'phone']
+  const allowed = ['status', 'role', 'instance_name', 'password_hash', 'trial_ends_at', 'name', 'phone', 'max_instances']
   const sets = []
   const vals = []
   let i = 1
@@ -508,6 +535,43 @@ async function deleteSession(token) {
 
 async function ping() {
   await pool.query('SELECT 1')
+}
+
+// ── User instances ────────────────────────────────────────────────────────────
+
+async function getUserInstances(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, instance_name as "instanceName", label, created_at as "createdAt"
+     FROM user_instances WHERE user_id=$1 ORDER BY created_at`,
+    [userId]
+  )
+  return rows
+}
+
+async function countUserInstances(userId) {
+  const { rows } = await pool.query('SELECT COUNT(*) as count FROM user_instances WHERE user_id=$1', [userId])
+  return parseInt(rows[0].count)
+}
+
+async function addUserInstance(userId, instanceName, label) {
+  const { rows } = await pool.query(
+    `INSERT INTO user_instances (id, user_id, instance_name, label)
+     VALUES ($1,$2,$3,$4)
+     RETURNING id, instance_name as "instanceName", label, created_at as "createdAt"`,
+    [Date.now().toString(), userId, instanceName, label || 'WhatsApp']
+  )
+  return rows[0]
+}
+
+async function updateUserInstanceLabel(userId, instanceName, label) {
+  await pool.query(
+    'UPDATE user_instances SET label=$1 WHERE instance_name=$2 AND user_id=$3',
+    [label, instanceName, userId]
+  )
+}
+
+async function deleteUserInstance(userId, instanceName) {
+  await pool.query('DELETE FROM user_instances WHERE instance_name=$1 AND user_id=$2', [instanceName, userId])
 }
 
 // ── Scheduled campaigns ───────────────────────────────────────────────────────
@@ -692,6 +756,7 @@ async function updateDripItemStatus(id, status) {
 module.exports = {
   init, ping,
   getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout,
+  getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, deleteUserInstance,
   getDraft, saveDraft,
   getTemplates, addTemplate, updateTemplate, deleteTemplate,
   getAutoreplies, addAutoreply, updateAutoreply, deleteAutoreply,
