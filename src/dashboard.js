@@ -3,7 +3,6 @@ const http = require('http')
 const { exec } = require('child_process')
 const { parse } = require('csv-parse/sync')
 const crypto = require('crypto')
-const axios = require('axios')
 const db = require('./db')
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -358,30 +357,14 @@ async function sendWhatsappMedia(phone, caption, media, instanceName) {
 }
 
 async function notifyAdminNewUser(name, email, phone) {
-  const apiKey = process.env.RESEND_API_KEY
+  const adminPhone = process.env.ADMIN_PHONE
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase()
-  if (!apiKey || !adminEmail) return
+  if (!adminPhone || !adminEmail) return
+  const admin = await db.getUserByEmail(adminEmail)
+  if (!admin?.instance_name) return
   const when = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-  await axios.post('https://api.resend.com/emails', {
-    from: 'ZapVibe <onboarding@resend.dev>',
-    to: [adminEmail],
-    subject: `Novo cadastro: ${name}`,
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;background:#111;color:#e5e7eb;border-radius:12px;padding:24px">
-        <h2 style="color:#8b5cf6;margin-top:0">Novo cadastro no ZapVibe</h2>
-        <table style="width:100%;border-collapse:collapse">
-          <tr><td style="padding:8px 0;color:#9ca3af;width:100px">Nome</td><td style="padding:8px 0"><b>${name}</b></td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af">E-mail</td><td style="padding:8px 0">${email}</td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af">Telefone</td><td style="padding:8px 0">${phone}</td></tr>
-          <tr><td style="padding:8px 0;color:#9ca3af">Horario</td><td style="padding:8px 0">${when}</td></tr>
-        </table>
-        <hr style="border:1px solid #374151;margin:16px 0"/>
-        <p style="color:#9ca3af;font-size:13px;margin:0">Acesse o painel admin para ativar a conta.</p>
-      </div>`
-  }, {
-    headers: { 'Authorization': `Bearer ${apiKey}` },
-    timeout: 10000
-  })
+  const msg = `🆕 *Novo cadastro no ZapVibe!*\n\n👤 *Nome:* ${name}\n📧 *E-mail:* ${email}\n📱 *Telefone:* ${phone}\n⏰ *Horário:* ${when}\n\nAcesse o painel admin para ativar.`
+  await sendWhatsapp(adminPhone, msg, admin.instance_name)
 }
 
 function detectMediatype(mimetype) {
@@ -3333,10 +3316,11 @@ const server = http.createServer(async (req, res) => {
     json({ error: 'Acesso negado' }, 403); return
   }
 
-  if (url === '/api/admin/test-email' && method === 'POST') {
+  if (url === '/api/admin/test-notify' && method === 'POST') {
+    if (!process.env.ADMIN_PHONE) { json({ error: 'ADMIN_PHONE não configurado no Railway' }, 400); return }
     try {
       await notifyAdminNewUser('Teste Manual', 'teste@exemplo.com', '11999999999')
-      json({ ok: true, msg: 'Email enviado com sucesso' }); return
+      json({ ok: true, msg: 'WhatsApp enviado para ' + process.env.ADMIN_PHONE }); return
     } catch (e) {
       json({ error: e.message }, 500); return
     }
@@ -3426,7 +3410,7 @@ async function seedAdmin() {
 
 server.listen(PORT, () => {
   console.log(`\n⚡ ZapVibe Dashboard → http://localhost:${PORT}\n`)
-  console.log(`📧 Email notify: ${process.env.RESEND_API_KEY ? 'CONFIGURADO (Resend)' : 'NÃO CONFIGURADO (RESEND_API_KEY ausente)'}`)
+  console.log(`🔔 Notify novo cadastro: ${process.env.ADMIN_PHONE ? 'WhatsApp → ' + process.env.ADMIN_PHONE : 'NÃO CONFIGURADO (ADMIN_PHONE ausente)'}`)
   if (process.platform === 'win32') exec(`start "" "http://localhost:${PORT}"`)
 })
 
