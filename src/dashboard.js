@@ -1294,23 +1294,46 @@ async function renameInstance(instanceName) {
   loadInstances()
 }
 
+let _qrPollTimer = null
 async function connectInstance(instanceName) {
+  if (_qrPollTimer) { clearInterval(_qrPollTimer); _qrPollTimer = null }
   const modal = document.getElementById('qr-modal')
   const content = document.getElementById('qr-modal-content')
   const title = document.getElementById('qr-modal-title')
   if (title) title.textContent = \`Conectar: \${instanceName}\`
-  content.innerHTML = '<div class="animate-pulse bg-gray-800 w-48 h-48 rounded-xl flex items-center justify-center"><span class="text-gray-600 text-xs">Gerando QR...</span></div>'
+  content.innerHTML = '<div class="animate-pulse bg-gray-800 w-48 h-48 rounded-xl flex items-center justify-center"><span id="qr-load-txt" class="text-gray-600 text-xs">Iniciando...</span></div>'
   modal.classList.remove('hidden')
-  const r = await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/connect\`, {method:'POST'}).then(r=>r.json())
-  if (r.qr) {
-    content.innerHTML = \`<div class="bg-white p-3 rounded-xl"><img src="\${r.qr}" class="w-48 h-48 object-contain"/></div>\`
-  } else {
-    content.innerHTML = '<p class="text-sm text-gray-400 py-8">QR não disponível. Tente novamente.</p>'
-  }
-  setTimeout(loadInstances, 15000)
+  await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/connect\`, {method:'POST'}).catch(()=>{})
+  let hasQr = false, attempts = 0
+  _qrPollTimer = setInterval(async () => {
+    if (!document.getElementById('qr-modal') || modal.classList.contains('hidden')) {
+      clearInterval(_qrPollTimer); _qrPollTimer = null; return
+    }
+    const st = await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/status\`).then(r=>r.json()).catch(()=>({}))
+    if (st?.instance?.state === 'open') {
+      clearInterval(_qrPollTimer); _qrPollTimer = null
+      content.innerHTML = '<div class="flex flex-col items-center gap-3 py-8"><div class="text-5xl">✅</div><p class="text-green-400 font-semibold mt-2">WhatsApp conectado!</p></div>'
+      setTimeout(() => { modal.classList.add('hidden'); loadInstances() }, 2000)
+      return
+    }
+    attempts++
+    if (attempts > 40) { clearInterval(_qrPollTimer); _qrPollTimer = null; return }
+    const qr = await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/qr\`).then(r=>r.json()).catch(()=>({}))
+    if (qr.base64) {
+      hasQr = true
+      content.innerHTML = \`<div class="bg-white p-3 rounded-xl"><img src="\${qr.base64}" class="w-48 h-48 object-contain"/></div>\`
+    } else if (!hasQr) {
+      const el = document.getElementById('qr-load-txt')
+      if (el) el.textContent = \`Gerando QR\${'...'.slice(0, (attempts % 3) + 1)}\`
+    }
+  }, 3000)
 }
 
-function closeQrModal() { document.getElementById('qr-modal').classList.add('hidden'); loadInstances() }
+function closeQrModal() {
+  if (_qrPollTimer) { clearInterval(_qrPollTimer); _qrPollTimer = null }
+  document.getElementById('qr-modal').classList.add('hidden')
+  loadInstances()
+}
 
 async function disconnectInstance(instanceName) {
   if (!confirm(\`Desconectar \${instanceName}?\`)) return
@@ -3555,14 +3578,16 @@ const server = http.createServer(async (req, res) => {
     const instName = decodeURIComponent(url.split('/')[3])
     try {
       await fetchApi('/instance/create', 'POST', { instanceName: instName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(() => {})
-      let result = {}
-      for (let i = 0; i < 6; i++) {
-        await sleep(3000)
-        result = await fetchApi(`/instance/connect/${instName}`, 'GET').catch(() => ({}))
-        if (result.qrcode?.base64 || result.base64) break
-      }
-      json({ qr: result.qrcode?.base64 || result.base64 || null }); return
+      json({ ok: true }); return
     } catch (e) { json({ error: e.message }, 500); return }
+  }
+
+  if (url.startsWith('/api/instances/') && url.endsWith('/qr') && method === 'GET') {
+    const instName = decodeURIComponent(url.split('/')[3])
+    try {
+      const result = await fetchApi(`/instance/connect/${instName}`, 'GET').catch(() => ({}))
+      json({ base64: result.qrcode?.base64 || result.base64 || null }); return
+    } catch (e) { json({ base64: null }); return }
   }
 
   if (url.startsWith('/api/instances/') && url.endsWith('/disconnect') && method === 'POST') {
