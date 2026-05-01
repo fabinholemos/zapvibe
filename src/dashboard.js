@@ -175,16 +175,20 @@ async function resolveJidForSending(jid, pushName, userId, instanceName) {
 }
 
 async function configureWebhookForInstance(instanceName) {
-  const baseUrl = process.env.WEBHOOK_BASE_URL || `http://host.docker.internal:${PORT}`
+  const baseUrl = process.env.WEBHOOK_BASE_URL || `http://localhost:${PORT}`
   try {
-    await fetchApi(`/webhook/set/${instanceName}`, 'POST', {
+    const result = await fetchApi(`/webhook/set/${instanceName}`, 'POST', {
       url: `${baseUrl}/webhook`,
+      enabled: true,
       webhookByEvents: false,
+      webhook_by_events: false,
+      webhookBase64: false,
+      webhook_base64: false,
       events: ['MESSAGES_UPSERT']
     })
-    console.log(`✔ Webhook configurado para ${instanceName}`)
+    console.log(`✔ Webhook configurado para ${instanceName}:`, JSON.stringify(result).slice(0, 200))
   } catch (e) {
-    console.log(`⚠ Webhook não configurado para ${instanceName}`)
+    console.log(`⚠ Webhook não configurado para ${instanceName}:`, e.message)
   }
 }
 
