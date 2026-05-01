@@ -227,31 +227,9 @@ async function processWebhook(data) {
   if (!msg || msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe ou sem msg'); return }
 
   const jid = msg.key?.remoteJid || ''
+  if (!jid || jid.endsWith('@g.us')) { console.log('[Webhook] ignorado: grupo ou sem jid'); return }
+
   const instanceName = data.instance || INSTANCE
-
-  // Auto-discover groups from incoming group messages
-  if (jid.endsWith('@g.us')) {
-    const user = await db.getUserByInstance(instanceName).catch(() => null)
-    if (user) {
-      const existing = await db.getWaGroups(user.id, instanceName).catch(() => [])
-      if (!existing.find(g => g.jid === jid)) {
-        fetchApi(`/group/findGroupInfos/${instanceName}?groupJid=${encodeURIComponent(jid)}`, 'GET').then(info => {
-          if (info?.id) {
-            db.syncWaGroups(user.id, instanceName, [{
-              jid: info.id,
-              name: info.subject || info.id,
-              participants: info.size || (Array.isArray(info.participants) ? info.participants.length : 0)
-            }]).catch(() => {})
-            console.log(`[Webhook] grupo descoberto: ${info.subject || jid}`)
-          }
-        }).catch(() => {})
-      }
-    }
-    return
-  }
-
-  if (!jid) { console.log('[Webhook] ignorado: sem jid'); return }
-
   const user = await db.getUserByInstance(instanceName).catch(() => null)
   if (!user) { console.log('[Webhook] instância sem usuário:', instanceName); return }
   const userId = user.id
@@ -2046,12 +2024,16 @@ async function deleteAutoRule(id) {
 
 async function checkWebhookStatus() {
   try {
-    const r = await fetch('/api/status').then(r=>r.json())
-    const connected = r?.instance?.state === 'open'
-    document.getElementById('webhook-status').textContent = connected
+    const [statusR, reconfR] = await Promise.all([
+      fetch('/api/status').then(r=>r.json()),
+      fetch('/api/reconfigure-webhooks', {method:'POST'}).then(r=>r.json()).catch(()=>({}))
+    ])
+    const connected = statusR?.instance?.state === 'open'
+    const el = document.getElementById('webhook-status')
+    el.textContent = connected
       ? '✔ Webhook ativo — respostas automáticas funcionando'
       : '⚠ WhatsApp desconectado — conecte na aba Conexão'
-    document.getElementById('webhook-status').className = connected ? 'text-xs text-green-500 mt-0.5' : 'text-xs text-amber-500 mt-0.5'
+    el.className = connected ? 'text-xs text-green-500 mt-0.5' : 'text-xs text-amber-500 mt-0.5'
   } catch {}
 }
 
@@ -3625,6 +3607,20 @@ const server = http.createServer(async (req, res) => {
     try { json(await fetchApi(`/instance/connectionState/${instName}`, 'GET')) }
     catch (e) { json({ instance: { state: 'close' } }) }
     return
+  }
+
+  if (url === '/api/reconfigure-webhooks' && method === 'POST') {
+    const instances = await db.getUserInstances(userId)
+    const results = []
+    for (const inst of instances) {
+      try {
+        await configureWebhookForInstance(inst.instanceName)
+        results.push({ instance: inst.instanceName, ok: true })
+      } catch (e) {
+        results.push({ instance: inst.instanceName, ok: false, error: e.message })
+      }
+    }
+    json({ results }); return
   }
 
   // Admin routes
