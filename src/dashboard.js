@@ -3374,23 +3374,26 @@ const server = http.createServer(async (req, res) => {
       const req2 = (isHttps ? require('https') : require('http')).request({
         hostname: u.hostname, port: u.port || (isHttps ? 443 : 80),
         path: u.pathname + u.search, method: 'GET',
-        headers: { apikey: API_KEY, 'Content-Type': 'application/json' }
+        headers: { apikey: API_KEY, 'Content-Type': 'application/json', 'Accept-Encoding': 'identity' }
       }, res2 => {
-        let d = ''
-        res2.on('data', c => d += c)
-        res2.on('end', () => resolve({ status: res2.statusCode, body: d }))
+        const chunks = []
+        res2.on('data', c => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
+        res2.on('end', () => {
+          const body = Buffer.concat(chunks).toString('utf8')
+          resolve({ status: res2.statusCode, headers: res2.headers, body, bodyLen: chunks.reduce((s,c)=>s+c.length,0) })
+        })
       })
       req2.setTimeout(30000, () => { req2.destroy(); resolve({ status: 0, body: 'timeout' }) })
       req2.on('error', e => resolve({ status: 0, body: e.message }))
       req2.end()
     })
-    console.log(`[wa-groups sync] instance=${instanceName} status=${rawResult.status} body=${rawResult.body.slice(0, 500)}`)
+    console.log(`[wa-groups sync] instance=${instanceName} status=${rawResult.status} bodyLen=${rawResult.bodyLen} headers=${JSON.stringify(rawResult.headers)} body=${rawResult.body.slice(0, 500)}`)
     if (rawResult.status === 0) { json({ error: rawResult.body }, 502); return }
     let raw
     try { raw = JSON.parse(rawResult.body) } catch { raw = null }
     const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.groups) ? raw.groups : [])
     if (!list.length) {
-      json({ ok: true, count: 0, groups: [], debug: `status=${rawResult.status} body=${rawResult.body.slice(0, 300)}` }); return
+      json({ ok: true, count: 0, groups: [], debug: `status=${rawResult.status} bodyLen=${rawResult.bodyLen} enc=${rawResult.headers?.['content-encoding']||'none'} body=${rawResult.body.slice(0, 200)}` }); return
     }
     const groups = list.map(g => ({
       jid: g.id || g.jid,
