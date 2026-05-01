@@ -3368,7 +3368,7 @@ const server = http.createServer(async (req, res) => {
     const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || userInstance
     // Raw call to capture status + body for debugging
     const rawResult = await new Promise(resolve => {
-      const u = new URL(API_URL + `/chat/findChats/${instanceName}`)
+      const u = new URL(API_URL + `/group/fetchAllGroups/${instanceName}?getParticipants=false`)
       const isHttps = u.protocol === 'https:'
       const transport = isHttps ? require('https') : require('http')
       const req2 = (isHttps ? require('https') : require('http')).request({
@@ -3395,7 +3395,7 @@ const server = http.createServer(async (req, res) => {
     if (!list.length) {
       json({ ok: true, count: 0, groups: [], debug: `status=${rawResult.status} bodyLen=${rawResult.bodyLen} enc=${rawResult.headers?.['content-encoding']||'none'} body=${rawResult.body.slice(0, 200)}` }); return
     }
-    // findChats returns all chats — filter only group JIDs (@g.us)
+    // fetchAllGroups returns only groups — all items are @g.us
     const groups = list
       .filter(g => (g.id || g.jid || '').endsWith('@g.us'))
       .map(g => ({
