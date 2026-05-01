@@ -180,7 +180,7 @@ async function configureWebhookForInstance(instanceName) {
     await fetchApi(`/webhook/set/${instanceName}`, 'POST', {
       url: `${baseUrl}/webhook`,
       webhookByEvents: false,
-      events: ['MESSAGES_UPSERT', 'GROUPS_UPSERT']
+      events: ['MESSAGES_UPSERT']
     })
     console.log(`✔ Webhook configurado para ${instanceName}`)
   } catch (e) {
