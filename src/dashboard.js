@@ -227,9 +227,31 @@ async function processWebhook(data) {
   if (!msg || msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe ou sem msg'); return }
 
   const jid = msg.key?.remoteJid || ''
-  if (!jid || jid.endsWith('@g.us')) { console.log('[Webhook] ignorado: grupo ou sem jid'); return }
-
   const instanceName = data.instance || INSTANCE
+
+  // Auto-discover groups from incoming group messages
+  if (jid.endsWith('@g.us')) {
+    const user = await db.getUserByInstance(instanceName).catch(() => null)
+    if (user) {
+      const existing = await db.getWaGroups(user.id, instanceName).catch(() => [])
+      if (!existing.find(g => g.jid === jid)) {
+        fetchApi(`/group/findGroupInfos/${instanceName}?groupJid=${encodeURIComponent(jid)}`, 'GET').then(info => {
+          if (info?.id) {
+            db.syncWaGroups(user.id, instanceName, [{
+              jid: info.id,
+              name: info.subject || info.id,
+              participants: info.size || (Array.isArray(info.participants) ? info.participants.length : 0)
+            }]).catch(() => {})
+            console.log(`[Webhook] grupo descoberto: ${info.subject || jid}`)
+          }
+        }).catch(() => {})
+      }
+    }
+    return
+  }
+
+  if (!jid) { console.log('[Webhook] ignorado: sem jid'); return }
+
   const user = await db.getUserByInstance(instanceName).catch(() => null)
   if (!user) { console.log('[Webhook] instância sem usuário:', instanceName); return }
   const userId = user.id
