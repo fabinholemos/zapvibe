@@ -180,7 +180,7 @@ async function configureWebhookForInstance(instanceName) {
     await fetchApi(`/webhook/set/${instanceName}`, 'POST', {
       url: `${baseUrl}/webhook`,
       webhookByEvents: false,
-      events: ['MESSAGES_UPSERT']
+      events: ['MESSAGES_UPSERT', 'GROUPS_UPSERT']
     })
     console.log(`✔ Webhook configurado para ${instanceName}`)
   } catch (e) {
@@ -200,8 +200,28 @@ async function configureWebhook() {
 }
 
 async function processWebhook(data) {
-  const evt = (data.event || '').toLowerCase().replace('.', '_')
+  const evt = (data.event || '').toLowerCase().replace(/\./g, '_')
   console.log('[Webhook] event:', data.event, '| normalizado:', evt)
+
+  // Auto-capture groups when Baileys syncs them after connect
+  if (evt === 'groups_upsert') {
+    const instanceName = data.instance || INSTANCE
+    const user = await db.getUserByInstance(instanceName).catch(() => null)
+    if (!user) return
+    const groups = (Array.isArray(data.data) ? data.data : [])
+      .filter(g => (g.id || '').endsWith('@g.us'))
+      .map(g => ({
+        jid: g.id,
+        name: g.subject || g.name || g.id,
+        participants: g.size || (Array.isArray(g.participants) ? g.participants.length : 0)
+      })).filter(g => g.jid)
+    if (groups.length) {
+      await db.syncWaGroups(user.id, instanceName, groups).catch(console.error)
+      console.log(`[Webhook] GROUPS_UPSERT: ${groups.length} grupos salvos para ${instanceName}`)
+    }
+    return
+  }
+
   if (!['messages_upsert', 'messages.upsert'].includes(evt)) return
   const msg = data.data
   if (!msg || msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe ou sem msg'); return }
@@ -2115,8 +2135,11 @@ async function syncWaGroups(instanceName) {
   try {
     const r = await fetch(\`/api/wa-groups/sync?instance=\${encodeURIComponent(instanceName)}\`, { method: 'POST' }).then(r => r.json())
     if (r.error) { alert('Erro: ' + r.error); return }
-    const debugInfo = r.count === 0 && r.debug ? \`\nResposta da API: \${r.debug}\` : ''
-    alert(\`✅ \${r.count} grupo(s) sincronizado(s) de \${instanceName}\${debugInfo}\`)
+    if (r.count === 0) {
+      alert(\`⏳ Nenhum grupo encontrado via API direta.\\n\\nOs grupos serão capturados automaticamente pelo webhook quando o WhatsApp sincronizar.\\n\\nTente: desconectar e reconectar o WhatsApp, aguardar 30s e verificar novamente.\`)
+    } else {
+      alert(\`✅ \${r.count} grupo(s) sincronizado(s) de \${instanceName}\`)
+    }
     await loadWaGroups()
   } catch (e) {
     alert('Erro ao sincronizar grupos: ' + e.message)
