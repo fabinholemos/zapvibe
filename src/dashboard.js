@@ -3623,6 +3623,19 @@ const server = http.createServer(async (req, res) => {
     json({ results }); return
   }
 
+  if (url === '/api/webhook-diagnostics' && method === 'GET') {
+    const instances = await db.getUserInstances(userId)
+    const diag = []
+    for (const inst of instances) {
+      const wh = await fetchApi(`/webhook/find/${inst.instanceName}`, 'GET').catch(e => ({ error: e.message }))
+      const st = await fetchApi(`/instance/connectionState/${inst.instanceName}`, 'GET').catch(() => ({}))
+      diag.push({ instance: inst.instanceName, state: st?.instance?.state, webhook: wh })
+    }
+    const rules = await db.getAutoreplies(userId)
+    const baseUrl = process.env.WEBHOOK_BASE_URL || `http://host.docker.internal:${PORT}`
+    json({ diag, rules: rules.map(r => ({ id: r.id, name: r.name, trigger: r.trigger, keywords: r.keywords, active: r.active })), expectedWebhookUrl: baseUrl + '/webhook' }); return
+  }
+
   // Admin routes
   if (url.startsWith('/api/admin/') && !isAdmin) {
     json({ error: 'Acesso negado' }, 403); return
