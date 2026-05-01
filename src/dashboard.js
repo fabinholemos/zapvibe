@@ -3170,6 +3170,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const created = await fetchApi('/instance/create', 'POST', { instanceName: userInstance, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(e => ({ error: e.message }))
       console.log('[Connect] create:', JSON.stringify(created).slice(0, 300))
+      configureWebhookForInstance(userInstance).catch(() => {})
       let result = {}
       for (let i = 0; i < 6; i++) {
         await sleep(3000)
@@ -3600,6 +3601,7 @@ const server = http.createServer(async (req, res) => {
     const instName = decodeURIComponent(url.split('/')[3])
     try {
       await fetchApi('/instance/create', 'POST', { instanceName: instName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }).catch(() => {})
+      configureWebhookForInstance(instName).catch(() => {})
       json({ ok: true }); return
     } catch (e) { json({ error: e.message }, 500); return }
   }
