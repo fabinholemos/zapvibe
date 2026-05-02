@@ -806,13 +806,18 @@ textarea{resize:vertical}
   <!-- Add WA Group Modal (fora das abas — funciona de qualquer aba) -->
   <div id="add-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
     <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
-      <h3 class="text-white font-semibold mb-4">Adicionar grupo do WhatsApp</h3>
+      <h3 class="text-white font-semibold mb-1">Adicionar grupo do WhatsApp</h3>
+      <p class="text-xs text-gray-500 mb-4">Cole o link de convite OU o JID do grupo</p>
       <div class="mb-3">
-        <label class="text-xs text-gray-400 mb-1 block">Link de convite do grupo</label>
-        <input id="add-group-link" type="text" placeholder="https://chat.whatsapp.com/..." class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+        <label class="text-xs text-gray-400 mb-1 block">Link de convite <span class="text-gray-600">(https://chat.whatsapp.com/...)</span></label>
+        <input id="add-group-link" type="text" placeholder="https://chat.whatsapp.com/ABC123" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
       </div>
       <div class="mb-3">
-        <label class="text-xs text-gray-400 mb-1 block">Nome do grupo (opcional — preenchido pelo sistema)</label>
+        <label class="text-xs text-gray-400 mb-1 block">JID direto <span class="text-gray-600">(alternativa — ex: 120363xxx@g.us)</span></label>
+        <input id="add-group-jid" type="text" placeholder="120363xxxxxxxxxx@g.us" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+      </div>
+      <div class="mb-3">
+        <label class="text-xs text-gray-400 mb-1 block">Nome do grupo <span class="text-gray-600">(obrigatório se usar JID direto)</span></label>
         <input id="add-group-name" type="text" placeholder="Nome do grupo" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
       </div>
       <div class="mb-4">
@@ -2229,15 +2234,16 @@ function openAddGroupModal() {
 
 async function addWaGroup() {
   const link = document.getElementById('add-group-link').value.trim()
+  const jid = document.getElementById('add-group-jid').value.trim()
   const name = document.getElementById('add-group-name').value.trim()
   const instanceName = document.getElementById('add-group-instance').value
-  if (!link) { alert('Cole o link de convite do grupo.'); return }
+  if (!link && !jid) { alert('Informe o link de convite OU o JID do grupo.'); return }
   const btn = event?.target
   if (btn) { btn.disabled = true; btn.textContent = 'Adicionando...' }
   try {
     const r = await fetch('/api/wa-groups/add', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inviteLink: link, name, instanceName })
+      body: JSON.stringify({ inviteLink: link, jid, name, instanceName })
     }).then(r => r.json())
     if (r.error) { alert('Erro: ' + r.error); return }
     alert(\`✅ Grupo "\${r.name}" adicionado!\`)
@@ -3468,21 +3474,32 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req)
     const instanceName = body.instanceName || userInstance
     const inviteLink = (body.inviteLink || '').trim()
+    const directJid = (body.jid || '').trim()
     const customName = (body.name || '').trim()
+
+    // Option A: JID direto
+    if (directJid) {
+      if (!directJid.endsWith('@g.us')) { json({ error: 'JID inválido. Formato: 120363xxx@g.us' }, 400); return }
+      if (!customName) { json({ error: 'Nome do grupo obrigatório quando usar JID direto.' }, 400); return }
+      await db.syncWaGroups(userId, instanceName, [{ jid: directJid, name: customName, participants: 0 }])
+      json({ ok: true, jid: directJid, name: customName }); return
+    }
+
+    // Option B: link de convite → resolve via Evolution API
     const match = inviteLink.match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/)
-    if (!match) { json({ error: 'Link inválido. Use: https://chat.whatsapp.com/CODIGO' }, 400); return }
+    if (!match) { json({ error: 'Informe um link de convite (https://chat.whatsapp.com/...) ou um JID direto (xxx@g.us).' }, 400); return }
     const inviteCode = match[1]
     try {
       const info = await fetchApi(`/group/inviteInfo/${instanceName}?inviteCode=${inviteCode}`, 'GET')
       const jid = info?.id || info?.jid
       const name = customName || info?.subject || info?.name || inviteCode
       if (!jid || !jid.endsWith('@g.us')) {
-        json({ error: 'Não foi possível resolver o grupo. Verifique se o link é válido e o WhatsApp está conectado.' }, 400); return
+        json({ error: 'API não retornou JID. Tente usar o JID direto do grupo (campo alternativo).' }, 400); return
       }
       await db.syncWaGroups(userId, instanceName, [{ jid, name, participants: info?.size || 0 }])
       json({ ok: true, jid, name }); return
     } catch (e) {
-      json({ error: 'Erro ao consultar link: ' + e.message }, 500); return
+      json({ error: 'Falha ao resolver link via API. Tente usar o JID direto do grupo. Detalhe: ' + e.message }, 500); return
     }
   }
 
