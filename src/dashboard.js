@@ -1019,10 +1019,11 @@ textarea{resize:vertical}
           <span class="text-xs text-gray-400">Enviar para grupo do WhatsApp</span>
         </label>
         <div id="wa-group-section" class="hidden">
-          <div class="flex gap-2 items-center">
+          <div class="flex gap-2 items-center mb-2">
             <select id="wa-group-select" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
               <option value="">Nenhum grupo — clique em ＋ Adicionar</option>
             </select>
+            <button onclick="syncAllWaGroups()" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-xl whitespace-nowrap" title="Buscar todos os grupos da conta">🔄 Buscar</button>
             <button onclick="openAddGroupModal()" class="px-3 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs rounded-xl whitespace-nowrap">＋ Adicionar</button>
           </div>
         </div>
@@ -2204,6 +2205,25 @@ function applyCampGroup() {
 
 
 // ── WA Groups ─────────────────────────────────────────────────────────────────
+async function syncAllWaGroups() {
+  const instanceName = document.getElementById('camp-instance')?.value || ''
+  const btn = event?.target
+  if (btn) { btn.disabled = true; btn.textContent = '⏳...' }
+  try {
+    const r = await fetch(\`/api/wa-groups/sync?instance=\${encodeURIComponent(instanceName)}\`, { method: 'POST' }).then(r => r.json())
+    if (r.count > 0) {
+      await loadWaGroups()
+      alert(\`✅ \${r.count} grupo(s) encontrado(s)!\`)
+    } else {
+      alert('Nenhum grupo encontrado via API. Use ＋ Adicionar com o link de convite ou JID do grupo.')
+    }
+  } catch(e) {
+    alert('Erro: ' + e.message)
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Buscar' }
+  }
+}
+
 async function loadWaGroups() {
   const instanceName = document.getElementById('camp-instance')?.value || ''
   const sel = document.getElementById('wa-group-select')
