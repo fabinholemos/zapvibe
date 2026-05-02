@@ -1785,7 +1785,7 @@ async function startCampaign() {
     const mediaInfo = await fetch('/api/media').then(r => r.json())
     const r = await fetch('/api/campaign/start', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groupJid, template: tpl, useMedia: !!mediaInfo, instanceName: selectedInstance })
+      body: JSON.stringify({ groupJid, groupName: document.getElementById('wa-group-select')?.selectedOptions[0]?.text || groupJid, template: tpl, useMedia: !!mediaInfo, instanceName: selectedInstance })
     }).then(r => r.json())
     if (r.error) { alert('Erro: ' + r.error); return }
     alert(\`✅ Mensagem enviada para o grupo!\`)
@@ -3417,6 +3417,16 @@ const server = http.createServer(async (req, res) => {
       } catch (e) {
         json({ error: 'Falha ao enviar para o grupo: ' + e.message }, 502); return
       }
+      await db.addCampaignLog({
+        id: Date.now().toString(),
+        templateId: body.templateId || null,
+        templateName: body.templateName || body.template?.slice(0, 40) || 'Grupo',
+        phones: [body.groupJid],
+        contacts: [{ nome: body.groupName || body.groupJid, telefone: body.groupJid }],
+        sent: 1,
+        failed: 0,
+        sentAt: new Date().toISOString()
+      }, userId).catch(() => {})
       json({ ok: true, groupMode: true }); return
     }
     const contacts = Array.isArray(body.contacts) && body.contacts.length ? body.contacts : await db.getContacts(userId)
