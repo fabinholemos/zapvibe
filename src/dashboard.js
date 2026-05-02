@@ -3471,7 +3471,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url === '/api/wa-groups/add' && method === 'POST') {
-    const body = await parseBody(req)
+    const body = await readBody(req)
     const instanceName = body.instanceName || userInstance
     const inviteLink = (body.inviteLink || '').trim()
     const directJid = (body.jid || '').trim()
