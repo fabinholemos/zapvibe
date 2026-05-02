@@ -185,7 +185,7 @@ async function configureWebhookForInstance(instanceName) {
       webhook_by_events: false,
       webhookBase64: false,
       webhook_base64: false,
-      events: ['MESSAGES_UPSERT']
+      events: ['MESSAGES_UPSERT', 'GROUPS_UPSERT']
     })
     console.log(`✔ Webhook configurado para ${instanceName}:`, JSON.stringify(result).slice(0, 200))
   } catch (e) {
@@ -232,7 +232,18 @@ async function processWebhook(data) {
   if (!msg || msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe ou sem msg'); return }
 
   const jid = msg.key?.remoteJid || ''
-  if (!jid || jid.endsWith('@g.us')) { console.log('[Webhook] ignorado: grupo ou sem jid'); return }
+  if (!jid) { console.log('[Webhook] ignorado: sem jid'); return }
+  if (jid.endsWith('@g.us')) {
+    // salva grupo automaticamente mas não processa auto-resposta
+    const instName = data.instance || INSTANCE
+    const grpUser = await db.getUserByInstance(instName).catch(() => null)
+    if (grpUser) {
+      const grpName = msg.key?.participant ? (data.data?.pushName || jid) : jid
+      await db.syncWaGroups(grpUser.id, instName, [{ jid, name: grpName, participants: 0 }]).catch(() => {})
+      console.log(`[Webhook] grupo auto-capturado: ${jid} para ${instName}`)
+    }
+    return
+  }
 
   const instanceName = data.instance || INSTANCE
   const user = await db.getUserByInstance(instanceName).catch(() => null)
