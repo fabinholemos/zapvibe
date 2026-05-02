@@ -787,29 +787,6 @@ textarea{resize:vertical}
     <!-- Instance list -->
     <div id="inst-list" class="space-y-3"></div>
 
-    <!-- Add WA Group Modal -->
-    <div id="add-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
-        <h3 class="text-white font-semibold mb-4">Adicionar grupo do WhatsApp</h3>
-        <div class="mb-3">
-          <label class="text-xs text-gray-400 mb-1 block">Link de convite do grupo</label>
-          <input id="add-group-link" type="text" placeholder="https://chat.whatsapp.com/..." class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
-        </div>
-        <div class="mb-3">
-          <label class="text-xs text-gray-400 mb-1 block">Nome do grupo (opcional — preenchido pelo sistema)</label>
-          <input id="add-group-name" type="text" placeholder="Nome do grupo" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
-        </div>
-        <div class="mb-4">
-          <label class="text-xs text-gray-400 mb-1 block">Instância WhatsApp</label>
-          <select id="add-group-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></select>
-        </div>
-        <div class="flex gap-2">
-          <button onclick="addWaGroup()" class="flex-1 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Adicionar</button>
-          <button onclick="document.getElementById('add-group-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-xl">Cancelar</button>
-        </div>
-      </div>
-    </div>
-
     <!-- QR Modal -->
     <div id="qr-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
       <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 fade text-center">
@@ -822,6 +799,29 @@ textarea{resize:vertical}
         </div>
         <p class="text-xs text-gray-600 mb-4">Celular → 3 pontos → Aparelhos conectados → Conectar</p>
         <button onclick="closeQrModal()" class="w-full py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-xl">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add WA Group Modal (fora das abas — funciona de qualquer aba) -->
+  <div id="add-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
+      <h3 class="text-white font-semibold mb-4">Adicionar grupo do WhatsApp</h3>
+      <div class="mb-3">
+        <label class="text-xs text-gray-400 mb-1 block">Link de convite do grupo</label>
+        <input id="add-group-link" type="text" placeholder="https://chat.whatsapp.com/..." class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+      </div>
+      <div class="mb-3">
+        <label class="text-xs text-gray-400 mb-1 block">Nome do grupo (opcional — preenchido pelo sistema)</label>
+        <input id="add-group-name" type="text" placeholder="Nome do grupo" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+      </div>
+      <div class="mb-4">
+        <label class="text-xs text-gray-400 mb-1 block">Instância WhatsApp</label>
+        <select id="add-group-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></select>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="addWaGroup()" class="flex-1 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Adicionar</button>
+        <button onclick="document.getElementById('add-group-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-xl">Cancelar</button>
       </div>
     </div>
   </div>
