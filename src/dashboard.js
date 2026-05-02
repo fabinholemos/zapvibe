@@ -229,21 +229,25 @@ async function processWebhook(data) {
 
   if (!['messages_upsert', 'messages.upsert'].includes(evt)) return
   const msg = data.data
-  if (!msg || msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe ou sem msg'); return }
+  if (!msg) return
 
   const jid = msg.key?.remoteJid || ''
-  if (!jid) { console.log('[Webhook] ignorado: sem jid'); return }
+  if (!jid) return
+
+  // captura grupo independente de fromMe (mensagem enviada por você também conta)
   if (jid.endsWith('@g.us')) {
-    // salva grupo automaticamente mas não processa auto-resposta
     const instName = data.instance || INSTANCE
     const grpUser = await db.getUserByInstance(instName).catch(() => null)
     if (grpUser) {
-      const grpName = msg.key?.participant ? (data.data?.pushName || jid) : jid
+      const grpName = data.data?.pushName || msg.key?.participant || jid
       await db.syncWaGroups(grpUser.id, instName, [{ jid, name: grpName, participants: 0 }]).catch(() => {})
       console.log(`[Webhook] grupo auto-capturado: ${jid} para ${instName}`)
     }
     return
   }
+
+  // ignora fromMe só para auto-respostas (não para grupos)
+  if (msg.key?.fromMe) return
 
   const instanceName = data.instance || INSTANCE
   const user = await db.getUserByInstance(instanceName).catch(() => null)
