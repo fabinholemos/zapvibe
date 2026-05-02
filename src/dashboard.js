@@ -48,6 +48,7 @@ const LOGIN_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZapVibe — Login</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231E1B4B'/><path d='M20 3L9 18h7l-4 11 14-16h-8z' fill='%238B5CF6'/></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -587,6 +588,7 @@ function getAppHTML(email, isAdmin, userInstance) { return `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZapVibe</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231E1B4B'/><path d='M20 3L9 18h7l-4 11 14-16h-8z' fill='%238B5CF6'/></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -2533,6 +2535,7 @@ const LANDING_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZapVibe — Disparador de WhatsApp em Massa para Empresas</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231E1B4B'/><path d='M20 3L9 18h7l-4 11 14-16h-8z' fill='%238B5CF6'/></svg>">
 <meta name="description" content="Dispare mensagens em massa no WhatsApp usando seu próprio número. Automatize campanhas, respostas e follow-ups. Sem risco de ban. Teste 7 dias grátis.">
 <meta name="keywords" content="disparador whatsapp, envio em massa whatsapp, whatsapp marketing, automação whatsapp, campanha whatsapp, disparador whatsapp sem ban, whatsapp para empresas, software whatsapp marketing">
 <meta name="robots" content="index, follow">
@@ -2735,6 +2738,7 @@ const REGISTER_HTML = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZapVibe — Criar conta grátis</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231E1B4B'/><path d='M20 3L9 18h7l-4 11 14-16h-8z' fill='%238B5CF6'/></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{font-family:'Inter',sans-serif}</style>
 </head>
@@ -2816,6 +2820,7 @@ function getAdminHTML(email) { return `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZapVibe — Admin</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231E1B4B'/><path d='M20 3L9 18h7l-4 11 14-16h-8z' fill='%238B5CF6'/></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
 <style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');*{font-family:'Inter',sans-serif}</style>
 </head>
