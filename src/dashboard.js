@@ -3420,7 +3420,7 @@ const server = http.createServer(async (req, res) => {
       await db.addCampaignLog({
         id: Date.now().toString(),
         templateId: body.templateId || null,
-        templateName: body.templateName || body.template?.slice(0, 40) || 'Grupo',
+        templateName: body.groupName || body.templateName || 'Grupo WA',
         phones: [body.groupJid],
         contacts: [{ nome: body.groupName || body.groupJid, telefone: body.groupJid }],
         sent: 1,
