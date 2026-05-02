@@ -787,6 +787,29 @@ textarea{resize:vertical}
     <!-- Instance list -->
     <div id="inst-list" class="space-y-3"></div>
 
+    <!-- Add WA Group Modal -->
+    <div id="add-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
+        <h3 class="text-white font-semibold mb-4">Adicionar grupo do WhatsApp</h3>
+        <div class="mb-3">
+          <label class="text-xs text-gray-400 mb-1 block">Link de convite do grupo</label>
+          <input id="add-group-link" type="text" placeholder="https://chat.whatsapp.com/..." class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+        </div>
+        <div class="mb-3">
+          <label class="text-xs text-gray-400 mb-1 block">Nome do grupo (opcional — preenchido pelo sistema)</label>
+          <input id="add-group-name" type="text" placeholder="Nome do grupo" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+        </div>
+        <div class="mb-4">
+          <label class="text-xs text-gray-400 mb-1 block">Instância WhatsApp</label>
+          <select id="add-group-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></select>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="addWaGroup()" class="flex-1 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Adicionar</button>
+          <button onclick="document.getElementById('add-group-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-xl">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- QR Modal -->
     <div id="qr-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
       <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 fade text-center">
@@ -979,6 +1002,21 @@ textarea{resize:vertical}
         <select id="camp-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
           <option value="${userInstance}">📱 Principal (${userInstance})</option>
         </select>
+      </div>
+      <!-- WA Group mode toggle -->
+      <div class="mb-4 pb-4 border-b border-gray-800">
+        <label class="flex items-center gap-2 cursor-pointer mb-3">
+          <input type="checkbox" id="wa-group-toggle" onchange="toggleWaGroupMode()" class="w-4 h-4 rounded accent-violet-600"/>
+          <span class="text-xs text-gray-400">Enviar para grupo do WhatsApp</span>
+        </label>
+        <div id="wa-group-section" class="hidden">
+          <div class="flex gap-2 items-center">
+            <select id="wa-group-select" class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+              <option value="">Nenhum grupo — clique em ＋ Adicionar</option>
+            </select>
+            <button onclick="openAddGroupModal()" class="px-3 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs rounded-xl whitespace-nowrap">＋ Adicionar</button>
+          </div>
+        </div>
       </div>
       <!-- Group selector (contacts) -->
       <div id="camp-contacts-group-row" class="mb-4 pb-4 border-b border-gray-800">
@@ -2155,6 +2193,62 @@ function applyCampGroup() {
   renderContacts()
 }
 
+
+// ── WA Groups ─────────────────────────────────────────────────────────────────
+async function loadWaGroups() {
+  const instanceName = document.getElementById('camp-instance')?.value || ''
+  const sel = document.getElementById('wa-group-select')
+  if (!sel) return
+  const groups = await fetch(\`/api/wa-groups?instance=\${encodeURIComponent(instanceName)}\`).then(r => r.json()).catch(() => [])
+  sel.innerHTML = groups.length
+    ? groups.map(g => \`<option value="\${esc(g.jid)}">\${esc(g.name)}</option>\`).join('')
+    : '<option value="">Nenhum grupo — clique em ＋ Adicionar</option>'
+}
+
+function toggleWaGroupMode() {
+  const on = document.getElementById('wa-group-toggle')?.checked
+  document.getElementById('wa-group-section')?.classList.toggle('hidden', !on)
+  document.getElementById('camp-contacts-group-row')?.classList.toggle('hidden', on)
+  if (on) {
+    const summary = document.getElementById('camp-summary')
+    if (summary) summary.textContent = '1 mensagem para o grupo'
+    loadWaGroups()
+  } else {
+    updateCampSummary()
+  }
+}
+
+function openAddGroupModal() {
+  const instSel = document.getElementById('add-group-instance')
+  const campInst = document.getElementById('camp-instance')
+  if (instSel && campInst) instSel.innerHTML = campInst.innerHTML
+  document.getElementById('add-group-link').value = ''
+  document.getElementById('add-group-name').value = ''
+  document.getElementById('add-group-modal').classList.remove('hidden')
+}
+
+async function addWaGroup() {
+  const link = document.getElementById('add-group-link').value.trim()
+  const name = document.getElementById('add-group-name').value.trim()
+  const instanceName = document.getElementById('add-group-instance').value
+  if (!link) { alert('Cole o link de convite do grupo.'); return }
+  const btn = event?.target
+  if (btn) { btn.disabled = true; btn.textContent = 'Adicionando...' }
+  try {
+    const r = await fetch('/api/wa-groups/add', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inviteLink: link, name, instanceName })
+    }).then(r => r.json())
+    if (r.error) { alert('Erro: ' + r.error); return }
+    alert(\`✅ Grupo "\${r.name}" adicionado!\`)
+    document.getElementById('add-group-modal').classList.add('hidden')
+    await loadWaGroups()
+  } catch (e) {
+    alert('Erro: ' + e.message)
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Adicionar' }
+  }
+}
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
 async function loadHistory() {
@@ -3365,9 +3459,31 @@ const server = http.createServer(async (req, res) => {
   }
 
   // WA Groups
-  if (url.startsWith('/api/wa-groups') && !url.includes('/sync') && method === 'GET') {
+  if (url.startsWith('/api/wa-groups') && !url.includes('/sync') && !url.includes('/add') && method === 'GET') {
     const instanceName = new URL('http://x' + req.url).searchParams.get('instance') || null
     json(await db.getWaGroups(userId, instanceName)); return
+  }
+
+  if (url === '/api/wa-groups/add' && method === 'POST') {
+    const body = await parseBody(req)
+    const instanceName = body.instanceName || userInstance
+    const inviteLink = (body.inviteLink || '').trim()
+    const customName = (body.name || '').trim()
+    const match = inviteLink.match(/chat\.whatsapp\.com\/([A-Za-z0-9_-]+)/)
+    if (!match) { json({ error: 'Link inválido. Use: https://chat.whatsapp.com/CODIGO' }, 400); return }
+    const inviteCode = match[1]
+    try {
+      const info = await fetchApi(`/group/inviteInfo/${instanceName}?inviteCode=${inviteCode}`, 'GET')
+      const jid = info?.id || info?.jid
+      const name = customName || info?.subject || info?.name || inviteCode
+      if (!jid || !jid.endsWith('@g.us')) {
+        json({ error: 'Não foi possível resolver o grupo. Verifique se o link é válido e o WhatsApp está conectado.' }, 400); return
+      }
+      await db.syncWaGroups(userId, instanceName, [{ jid, name, participants: info?.size || 0 }])
+      json({ ok: true, jid, name }); return
+    } catch (e) {
+      json({ error: 'Erro ao consultar link: ' + e.message }, 500); return
+    }
   }
 
   if (url.startsWith('/api/wa-groups/sync') && method === 'POST') {
