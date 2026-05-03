@@ -1627,7 +1627,7 @@ async function saveAutoRule() {
   const templateName = templateId ? sel.options[sel.selectedIndex].text : null
   const timeStart = document.getElementById('ar-time-start').value
   const timeEnd = document.getElementById('ar-time-end').value
-  const hasTimeRange = timeStart && timeEnd && timeStart !== timeEnd
+  const hasTimeRange = _schedDays !== null && timeStart && timeEnd && timeStart !== timeEnd
   const validFollowups = _followupSteps.filter(s => s.message.trim() && s.delayHours > 0)
   const instSel = document.getElementById('ar-instance')
   const payload = {

@@ -230,9 +230,9 @@ async function processWebhook(data) {
 
   // Check schedule — send off-hours message if configured, otherwise skip
   if (!isWithinSchedule(matched)) {
+    console.log(`[Auto-reply] fora do horário → ${sendTo} (regra: ${matched.name})`)
     if (matched.offHoursMsg) {
       await sendWhatsapp(sendTo, applyTemplate(matched.offHoursMsg, contact), instanceName).catch(() => {})
-      console.log(`[Auto-reply] fora do horário → ${sendTo} (regra: ${matched.name})`)
     }
     return
   }
