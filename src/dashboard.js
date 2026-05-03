@@ -639,6 +639,11 @@ textarea{resize:vertical}
     <input id="ar-name" placeholder="Ex: Resposta de interesse" autocomplete="off"
       class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-4 focus:outline-none focus:border-violet-500"/>
 
+    <label class="text-xs text-gray-500 mb-1 block">WhatsApp</label>
+    <select id="ar-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-4 focus:outline-none focus:border-violet-500">
+      <option value="">Todos os números</option>
+    </select>
+
     <label class="text-xs text-gray-500 mb-1 block">Campanha associada</label>
     <select id="ar-template" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-4 focus:outline-none focus:border-violet-500">
       <option value="">Todas as campanhas (global)</option>
@@ -1566,6 +1571,13 @@ function openAutoModal(rule) {
   const preset = !rule?.activeDays ? 'always' : JSON.stringify(rule.activeDays) === '[1,2,3,4,5]' ? 'weekdays' : JSON.stringify(rule.activeDays) === '[0,6]' ? 'weekend' : 'custom'
   setSchedPreset(preset)
   updateDayBtns()
+  // Instances
+  fetch('/api/instances').then(r=>r.json()).then(instances => {
+    const sel = document.getElementById('ar-instance')
+    sel.innerHTML = '<option value="">Todos os números</option>' +
+      instances.map(i => \`<option value="\${i.instanceName}">\${esc(i.label || i.instanceName)}</option>\`).join('')
+    sel.value = rule?.instanceName || ''
+  })
   // Templates
   fetch('/api/templates').then(r=>r.json()).then(templates => {
     const sel = document.getElementById('ar-template')
@@ -1617,8 +1629,10 @@ async function saveAutoRule() {
   const timeEnd = document.getElementById('ar-time-end').value
   const hasTimeRange = timeStart && timeEnd && timeStart !== timeEnd
   const validFollowups = _followupSteps.filter(s => s.message.trim() && s.delayHours > 0)
+  const instSel = document.getElementById('ar-instance')
   const payload = {
     name, trigger, keywords,
+    instanceName: instSel.value || null,
     templateId, templateName,
     response: document.getElementById('ar-response').value,
     delay: parseInt(document.getElementById('ar-delay').value) || 2000,

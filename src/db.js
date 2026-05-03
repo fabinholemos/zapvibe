@@ -180,6 +180,7 @@ async function init() {
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS drip_id TEXT;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS off_hours_msg TEXT;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS followup_steps TEXT;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS instance_name TEXT;
     CREATE TABLE IF NOT EXISTS autoreply_followup_queue (
       id TEXT PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -367,15 +368,16 @@ async function getAutoreplies(userId) {
     activeEnd: r.active_end || null,
     dripId: r.drip_id || null,
     offHoursMsg: r.off_hours_msg || null,
-    followupSteps: r.followup_steps ? JSON.parse(r.followup_steps) : []
+    followupSteps: r.followup_steps ? JSON.parse(r.followup_steps) : [],
+    instanceName: r.instance_name || null
   }))
 }
 
 async function addAutoreply(r, userId) {
   await pool.query(
     `INSERT INTO autoreplies
-      (id, user_id, name, trigger, keywords, response, delay, active, media_base64, media_mimetype, media_filename, created_at, template_id, template_name, active_days, active_start, active_end, drip_id, off_hours_msg, followup_steps)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+      (id, user_id, name, trigger, keywords, response, delay, active, media_base64, media_mimetype, media_filename, created_at, template_id, template_name, active_days, active_start, active_end, drip_id, off_hours_msg, followup_steps, instance_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
     [
       r.id, userId, r.name, r.trigger,
       JSON.stringify(r.keywords || []),
@@ -385,7 +387,8 @@ async function addAutoreply(r, userId) {
       r.activeDays ? JSON.stringify(r.activeDays) : null,
       r.activeStart || null, r.activeEnd || null,
       r.dripId || null, r.offHoursMsg || null,
-      r.followupSteps?.length ? JSON.stringify(r.followupSteps) : null
+      r.followupSteps?.length ? JSON.stringify(r.followupSteps) : null,
+      r.instanceName || null
     ]
   )
 }
@@ -400,8 +403,8 @@ async function updateAutoreply(id, updates, userId) {
       media_base64=$7, media_mimetype=$8, media_filename=$9,
       template_id=$10, template_name=$11,
       active_days=$12, active_start=$13, active_end=$14, drip_id=$15, off_hours_msg=$16,
-      followup_steps=$17
-     WHERE id=$18 AND user_id=$19`,
+      followup_steps=$17, instance_name=$18
+     WHERE id=$19 AND user_id=$20`,
     [
       updates.name       ?? cur.name,
       updates.trigger    ?? cur.trigger,
@@ -420,6 +423,7 @@ async function updateAutoreply(id, updates, userId) {
       updates.dripId         !== undefined ? updates.dripId         : cur.drip_id,
       updates.offHoursMsg    !== undefined ? updates.offHoursMsg    : cur.off_hours_msg,
       updates.followupSteps  !== undefined ? (updates.followupSteps?.length ? JSON.stringify(updates.followupSteps) : null) : cur.followup_steps,
+      updates.instanceName   !== undefined ? updates.instanceName   : cur.instance_name,
       id, userId
     ]
   )
