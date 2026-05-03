@@ -3,6 +3,7 @@ const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappM
 
 const replyTracker = new Map()
 const REPLY_COOLDOWN = 5 * 60 * 1000
+const processedMsgIds = new Set()
 
 function isWithinSchedule(rule) {
   if (!rule.activeDays && !rule.activeStart && !rule.activeEnd) return true
@@ -119,6 +120,14 @@ async function processWebhook(data) {
   const jid = msg.key?.remoteJid || ''
   if (!jid) return
 
+  // Dedup — Evolution API sometimes sends the same event twice
+  const msgId = msg.key?.id
+  if (msgId) {
+    if (processedMsgIds.has(msgId)) { console.log('[Webhook] dup ignorado:', msgId); return }
+    processedMsgIds.add(msgId)
+    setTimeout(() => processedMsgIds.delete(msgId), 120000)
+  }
+
   // captura grupo independente de fromMe (mensagem enviada por você também conta)
   if (jid.endsWith('@g.us')) {
     const instName = data.instance || INSTANCE
@@ -183,7 +192,12 @@ async function processWebhook(data) {
   // Keywords rules checked first so menu + option flow works without cooldown blocking
   for (const rule of rules) {
     if (rule.trigger === 'keywords' && rule.keywords?.length) {
-      const hit = rule.keywords.some(kw => text.includes(kw.toLowerCase().trim()))
+      const hit = rule.keywords.some(kw => {
+        const k = kw.toLowerCase().trim()
+        if (!k) return false
+        // word-boundary match: exact, or surrounded by spaces
+        return text === k || text.startsWith(k + ' ') || text.endsWith(' ' + k) || text.includes(' ' + k + ' ')
+      })
       if (hit) { matched = rule; break }
     }
   }
