@@ -1523,11 +1523,19 @@ let _followupSteps = [] // [{ delayHours, message }]
 function setSchedPreset(preset) {
   ['always','weekdays','weekend','custom'].forEach(p => {
     const el = document.getElementById('sp-' + p)
-    el.className = el.className.replace(/bg-\S+\s?text-\S+/, '')
-    el.classList.add(p === preset ? 'bg-violet-700' : 'bg-gray-700', p === preset ? 'text-white' : 'text-gray-300')
+    const active = p === preset
+    el.classList.toggle('bg-violet-700', active)
+    el.classList.toggle('text-white', active)
+    el.classList.toggle('bg-gray-700', !active)
+    el.classList.toggle('text-gray-300', !active)
   })
   document.getElementById('sched-days-row').classList.toggle('hidden', preset !== 'custom')
-  if (preset === 'always') { _schedDays = null }
+  const timeRow = document.getElementById('ar-time-start')?.closest('div')
+  if (preset === 'always') {
+    _schedDays = null
+    document.getElementById('ar-time-start').value = '00:00'
+    document.getElementById('ar-time-end').value = '00:00'
+  }
   else if (preset === 'weekdays') { _schedDays = [1,2,3,4,5]; updateDayBtns() }
   else if (preset === 'weekend') { _schedDays = [0,6]; updateDayBtns() }
   else if (preset === 'custom') { if (!_schedDays) { _schedDays = [1,2,3,4,5]; updateDayBtns() } }
