@@ -4,6 +4,21 @@ const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappM
 const replyTracker = new Map()
 const REPLY_COOLDOWN = 5 * 60 * 1000
 
+function isWithinSchedule(rule) {
+  if (!rule.activeDays && !rule.activeStart && !rule.activeEnd) return true
+  const now = new Date()
+  const sp = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+  const day = sp.getDay()
+  const mins = sp.getHours() * 60 + sp.getMinutes()
+  if (rule.activeDays && rule.activeDays.length > 0 && !rule.activeDays.includes(day)) return false
+  if (rule.activeStart && rule.activeEnd) {
+    const [sh, sm] = rule.activeStart.split(':').map(Number)
+    const [eh, em] = rule.activeEnd.split(':').map(Number)
+    if (mins < sh * 60 + sm || mins >= eh * 60 + em) return false
+  }
+  return true
+}
+
 async function resolveJidForSending(jid, pushName, userId, instanceName) {
   if (!jid.endsWith('@lid')) return jid
   const lidKey = jid.replace(/@.+/, '')
@@ -186,6 +201,16 @@ async function processWebhook(data) {
     const n = c.telefone.replace(/\D/g, '')
     return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
   }) || { nome: msg.pushName || '', empresa: '', extra: '', telefone: phone }
+
+  // Check schedule — send off-hours message if configured, otherwise skip
+  if (!isWithinSchedule(matched)) {
+    if (matched.offHoursMsg) {
+      await sendWhatsapp(sendTo, applyTemplate(matched.offHoursMsg, contact), instanceName).catch(() => {})
+      console.log(`[Auto-reply] fora do horário → ${sendTo} (regra: ${matched.name})`)
+    }
+    return
+  }
+
   const replyText = applyTemplate(matched.response || '', contact)
 
   let replyResult
@@ -201,6 +226,30 @@ async function processWebhook(data) {
   }
 
   console.log(`[Auto-reply] → ${sendTo} (regra: ${matched.name}) | API:`, JSON.stringify(replyResult))
+
+  // Drip enrollment — queue all steps for this contact
+  if (matched.dripId) {
+    const drip = await db.getDrip(matched.dripId, userId).catch(() => null)
+    if (drip?.steps?.length) {
+      const queue = await db.getDripQueue(userId, matched.dripId).catch(() => [])
+      const alreadyEnrolled = queue.some(item => item.phone === phone)
+      if (!alreadyEnrolled) {
+        let cumMs = 0
+        const items = drip.steps.map((s, i) => {
+          if (i > 0) cumMs += (s.delayDays || 1) * 86400000
+          return {
+            id: `ar_${Date.now()}_${phone}_${i}_${matched.dripId}`,
+            dripId: matched.dripId, userId,
+            phone, nome: contact.nome || '',
+            stepIndex: i,
+            sendAt: new Date(Date.now() + cumMs).toISOString()
+          }
+        })
+        await db.addDripQueueItems(items).catch(() => {})
+        console.log(`[Auto-reply] drip enrolled: ${phone} → ${drip.name} (${items.length} etapas)`)
+      }
+    }
+  }
 }
 
 module.exports = { processWebhook, configureWebhook, configureWebhookForInstance }

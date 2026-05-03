@@ -679,7 +679,42 @@ textarea{resize:vertical}
       </label>
     </div>
 
-    <div class="flex gap-2">
+    <!-- Horário ativo -->
+    <div class="border-t border-gray-700 pt-4 mt-2 space-y-3">
+      <p class="text-xs font-semibold text-gray-300">⏰ Horário ativo</p>
+      <div class="flex gap-1.5 flex-wrap">
+        <button onclick="setSchedPreset('always')" id="sp-always" class="px-2.5 py-1 text-xs rounded-lg bg-violet-700 text-white">Sempre</button>
+        <button onclick="setSchedPreset('weekdays')" id="sp-weekdays" class="px-2.5 py-1 text-xs rounded-lg bg-gray-700 text-gray-300">Dias úteis</button>
+        <button onclick="setSchedPreset('weekend')" id="sp-weekend" class="px-2.5 py-1 text-xs rounded-lg bg-gray-700 text-gray-300">Fim de semana</button>
+        <button onclick="setSchedPreset('custom')" id="sp-custom" class="px-2.5 py-1 text-xs rounded-lg bg-gray-700 text-gray-300">Personalizado</button>
+      </div>
+      <div id="sched-days-row" class="hidden flex gap-1">
+        ${['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map((d,i) => `<button onclick="toggleSchedDay(${i})" id="sd-${i}" class="flex-1 py-1 text-xs rounded-lg bg-gray-700 text-gray-400">${d}</button>`).join('')}
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-gray-500 whitespace-nowrap">Das</label>
+        <input id="ar-time-start" type="time" value="08:00" class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-500"/>
+        <label class="text-xs text-gray-500">às</label>
+        <input id="ar-time-end" type="time" value="18:00" class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-500"/>
+        <label class="text-xs text-gray-600">(deixe iguais = sem limite)</label>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Mensagem fora do horário (opcional)</label>
+        <textarea id="ar-off-hours" rows="2" placeholder="Ex: Estamos fora do horário! Retornamos segunda das 8h às 18h."
+          class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></textarea>
+      </div>
+    </div>
+
+    <!-- Sequência drip -->
+    <div class="border-t border-gray-700 pt-4 mt-2">
+      <label class="text-xs text-gray-500 mb-1 block">🔁 Sequência automática após resposta (opcional)</label>
+      <select id="ar-drip" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-1 focus:outline-none focus:border-violet-500">
+        <option value="">Nenhuma</option>
+      </select>
+      <p class="text-xs text-gray-600">Quando alguém acionar esta regra, será inscrito automaticamente na sequência.</p>
+    </div>
+
+    <div class="flex gap-2 mt-4">
       <button onclick="saveAutoRule()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar regra</button>
       <button onclick="closeAutoModal()" class="flex-1 py-2 bg-gray-800 text-gray-400 text-sm rounded-xl">Cancelar</button>
     </div>
@@ -1476,8 +1511,41 @@ function setTrigger(type) {
   document.getElementById('trg-kw').dataset.active = type === 'keywords'
 }
 
+let _schedDays = null // null = always, array = specific days
+
+function setSchedPreset(preset) {
+  ['always','weekdays','weekend','custom'].forEach(p => {
+    const el = document.getElementById('sp-' + p)
+    el.className = el.className.replace(/bg-\S+\s?text-\S+/, '')
+    el.classList.add(p === preset ? 'bg-violet-700' : 'bg-gray-700', p === preset ? 'text-white' : 'text-gray-300')
+  })
+  document.getElementById('sched-days-row').classList.toggle('hidden', preset !== 'custom')
+  if (preset === 'always') { _schedDays = null }
+  else if (preset === 'weekdays') { _schedDays = [1,2,3,4,5]; updateDayBtns() }
+  else if (preset === 'weekend') { _schedDays = [0,6]; updateDayBtns() }
+  else if (preset === 'custom') { if (!_schedDays) { _schedDays = [1,2,3,4,5]; updateDayBtns() } }
+}
+
+function toggleSchedDay(i) {
+  if (!_schedDays) _schedDays = []
+  const idx = _schedDays.indexOf(i)
+  if (idx >= 0) _schedDays.splice(idx, 1); else _schedDays.push(i)
+  updateDayBtns()
+}
+
+function updateDayBtns() {
+  [0,1,2,3,4,5,6].forEach(i => {
+    const btn = document.getElementById('sd-' + i)
+    if (!btn) return
+    const on = _schedDays?.includes(i)
+    btn.className = btn.className.replace(/bg-\S+\s?text-\S+/, '')
+    btn.classList.add(on ? 'bg-violet-700' : 'bg-gray-700', on ? 'text-white' : 'text-gray-400')
+  })
+}
+
 function openAutoModal(rule) {
   arMediaData = null
+  _schedDays = rule?.activeDays || null
   document.getElementById('ar-id').value = rule?.id || ''
   document.getElementById('auto-modal-title').textContent = rule ? 'Editar regra' : 'Nova regra de auto-resposta'
   document.getElementById('ar-name').value = rule?.name || ''
@@ -1489,12 +1557,26 @@ function openAutoModal(rule) {
   document.getElementById('ar-media-remove').classList.toggle('hidden', !rule?.mediaFilename)
   if (rule?.mediaBase64) arMediaData = { base64: rule.mediaBase64, mimetype: rule.mediaMimetype, filename: rule.mediaFilename }
   setTrigger(rule?.trigger || 'keywords')
-  // Popula select de templates
+  // Schedule
+  document.getElementById('ar-time-start').value = rule?.activeStart || '08:00'
+  document.getElementById('ar-time-end').value = rule?.activeEnd || '18:00'
+  document.getElementById('ar-off-hours').value = rule?.offHoursMsg || ''
+  const preset = !rule?.activeDays ? 'always' : JSON.stringify(rule.activeDays) === '[1,2,3,4,5]' ? 'weekdays' : JSON.stringify(rule.activeDays) === '[0,6]' ? 'weekend' : 'custom'
+  setSchedPreset(preset)
+  updateDayBtns()
+  // Templates
   fetch('/api/templates').then(r=>r.json()).then(templates => {
     const sel = document.getElementById('ar-template')
     sel.innerHTML = '<option value="">Todas as campanhas (global)</option>' +
       templates.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('')
     sel.value = rule?.templateId || ''
+  })
+  // Drips
+  fetch('/api/drips').then(r=>r.json()).then(drips => {
+    const sel = document.getElementById('ar-drip')
+    sel.innerHTML = '<option value="">Nenhuma</option>' +
+      drips.map(d => \`<option value="\${d.id}">\${esc(d.name)}</option>\`).join('')
+    sel.value = rule?.dripId || ''
   })
   document.getElementById('auto-modal').classList.remove('hidden')
 }
@@ -1532,6 +1614,10 @@ async function saveAutoRule() {
   const sel = document.getElementById('ar-template')
   const templateId = sel.value || null
   const templateName = templateId ? sel.options[sel.selectedIndex].text : null
+  const timeStart = document.getElementById('ar-time-start').value
+  const timeEnd = document.getElementById('ar-time-end').value
+  const hasTimeRange = timeStart && timeEnd && timeStart !== timeEnd
+  const dripSel = document.getElementById('ar-drip')
   const payload = {
     name, trigger, keywords,
     templateId, templateName,
@@ -1540,7 +1626,12 @@ async function saveAutoRule() {
     active: document.getElementById('ar-active').checked,
     mediaBase64: arMediaData?.base64 || null,
     mediaMimetype: arMediaData?.mimetype || null,
-    mediaFilename: arMediaData?.filename || null
+    mediaFilename: arMediaData?.filename || null,
+    activeDays: _schedDays,
+    activeStart: hasTimeRange ? timeStart : null,
+    activeEnd: hasTimeRange ? timeEnd : null,
+    offHoursMsg: document.getElementById('ar-off-hours').value.trim() || null,
+    dripId: dripSel.value || null
   }
   if (id) {
     await fetch('/api/autoreplies/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })

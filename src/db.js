@@ -174,6 +174,11 @@ async function init() {
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_name TEXT;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_mimetype TEXT;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS active_days TEXT;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS active_start TEXT;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS active_end TEXT;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS drip_id TEXT;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS off_hours_msg TEXT;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS responses INTEGER DEFAULT 0;
     ALTER TABLE groups_table ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
@@ -343,21 +348,29 @@ async function getAutoreplies(userId) {
     mediaFilename: r.media_filename,
     createdAt: r.created_at,
     templateId: r.template_id,
-    templateName: r.template_name
+    templateName: r.template_name,
+    activeDays: r.active_days ? JSON.parse(r.active_days) : null,
+    activeStart: r.active_start || null,
+    activeEnd: r.active_end || null,
+    dripId: r.drip_id || null,
+    offHoursMsg: r.off_hours_msg || null
   }))
 }
 
 async function addAutoreply(r, userId) {
   await pool.query(
     `INSERT INTO autoreplies
-      (id, user_id, name, trigger, keywords, response, delay, active, media_base64, media_mimetype, media_filename, created_at, template_id, template_name)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      (id, user_id, name, trigger, keywords, response, delay, active, media_base64, media_mimetype, media_filename, created_at, template_id, template_name, active_days, active_start, active_end, drip_id, off_hours_msg)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
     [
       r.id, userId, r.name, r.trigger,
       JSON.stringify(r.keywords || []),
       r.response || '', r.delay || 1500, r.active !== false,
       r.mediaBase64 || null, r.mediaMimetype || null, r.mediaFilename || null,
-      r.createdAt, r.templateId || null, r.templateName || null
+      r.createdAt, r.templateId || null, r.templateName || null,
+      r.activeDays ? JSON.stringify(r.activeDays) : null,
+      r.activeStart || null, r.activeEnd || null,
+      r.dripId || null, r.offHoursMsg || null
     ]
   )
 }
@@ -370,8 +383,9 @@ async function updateAutoreply(id, updates, userId) {
     `UPDATE autoreplies SET
       name=$1, trigger=$2, keywords=$3, response=$4, delay=$5, active=$6,
       media_base64=$7, media_mimetype=$8, media_filename=$9,
-      template_id=$10, template_name=$11
-     WHERE id=$12 AND user_id=$13`,
+      template_id=$10, template_name=$11,
+      active_days=$12, active_start=$13, active_end=$14, drip_id=$15, off_hours_msg=$16
+     WHERE id=$17 AND user_id=$18`,
     [
       updates.name       ?? cur.name,
       updates.trigger    ?? cur.trigger,
@@ -384,6 +398,11 @@ async function updateAutoreply(id, updates, userId) {
       updates.mediaFilename  !== undefined ? updates.mediaFilename  : cur.media_filename,
       updates.templateId     !== undefined ? updates.templateId     : cur.template_id,
       updates.templateName   !== undefined ? updates.templateName   : cur.template_name,
+      updates.activeDays     !== undefined ? (updates.activeDays ? JSON.stringify(updates.activeDays) : null) : cur.active_days,
+      updates.activeStart    !== undefined ? updates.activeStart    : cur.active_start,
+      updates.activeEnd      !== undefined ? updates.activeEnd      : cur.active_end,
+      updates.dripId         !== undefined ? updates.dripId         : cur.drip_id,
+      updates.offHoursMsg    !== undefined ? updates.offHoursMsg    : cur.off_hours_msg,
       id, userId
     ]
   )
