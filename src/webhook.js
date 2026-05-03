@@ -120,10 +120,10 @@ async function processWebhook(data) {
   const jid = msg.key?.remoteJid || ''
   if (!jid) return
 
-  // Dedup — Evolution API sometimes sends the same event twice
+  // Dedup — Evolution API sometimes sends the same event twice (with different or same IDs)
   const msgId = msg.key?.id
   if (msgId) {
-    if (processedMsgIds.has(msgId)) { console.log('[Webhook] dup ignorado:', msgId); return }
+    if (processedMsgIds.has(msgId)) { console.log('[Webhook] dup ignorado (id):', msgId); return }
     processedMsgIds.add(msgId)
     setTimeout(() => processedMsgIds.delete(msgId), 120000)
   }
@@ -154,6 +154,12 @@ async function processWebhook(data) {
 
   const text = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').toLowerCase().trim()
   console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
+
+  // Dedup por conteúdo — cobre eventos com IDs diferentes para a mesma mensagem
+  const contentKey = `${phone}:${text}`
+  if (processedMsgIds.has(contentKey)) { console.log('[Webhook] dup ignorado (conteudo):', contentKey); return }
+  processedMsgIds.add(contentKey)
+  setTimeout(() => processedMsgIds.delete(contentKey), 10000)
 
   // Opt-out detection — before cooldown check so it always works
   const OPTOUT_KEYWORDS = ['sair', 'parar', 'stop', 'cancelar', 'remover', 'descadastrar', 'nao quero', 'não quero']
