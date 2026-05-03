@@ -85,6 +85,16 @@ async function checkDrips() {
         try {
           await sendWhatsapp(item.phone, applyTemplate(step.message, contact), instanceName)
           await db.updateDripItemStatus(item.id, 'sent')
+          await db.addCampaignLog({
+            id: `drip_${item.id}`,
+            templateId: null,
+            templateName: `🔁 ${drip.name} — Etapa ${item.step_index + 1}`,
+            phones: [item.phone.replace(/\D/g, '')],
+            contacts: [{ nome: item.nome, telefone: item.phone }],
+            sent: 1,
+            failed: 0,
+            sentAt: new Date().toISOString()
+          }, user.id).catch(() => {})
           const nextIdx = item.step_index + 1
           if (nextIdx < drip.steps.length) {
             const nextStep = drip.steps[nextIdx]

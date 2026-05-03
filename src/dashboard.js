@@ -1855,10 +1855,16 @@ function renderHistory(history) {
     const responses = h.responses || 0
     const respRate = sentCount > 0 ? Math.round(responses / sentCount * 100) : 0
     const respBadge = responses > 0 ? \`<span class="text-xs text-blue-400">💬 \${responses} respostas (\${respRate}%)</span>\` : ''
+    const name = h.templateName || 'Campanha #' + (i+1)
+    const srcBadge = name.startsWith('🔁') ? \`<span class="text-xs px-1.5 py-0.5 bg-violet-900/50 text-violet-300 rounded">Drip</span>\`
+      : name.startsWith('📅') || h.templateName?.includes('agendad') ? \`<span class="text-xs px-1.5 py-0.5 bg-blue-900/50 text-blue-300 rounded">Agendada</span>\`
+      : name.match(/vencimento|dias antes/i) ? \`<span class="text-xs px-1.5 py-0.5 bg-amber-900/50 text-amber-300 rounded">Vencimento</span>\`
+      : \`<span class="text-xs px-1.5 py-0.5 bg-gray-700 text-gray-400 rounded">Manual</span>\`
     return \`<div class="px-4 py-3">
       <div class="flex items-center justify-between mb-1 flex-wrap gap-2">
         <div class="flex items-center gap-3 flex-wrap">
-          <span class="text-sm font-medium text-white">\${esc(h.templateName || 'Campanha #' + (i+1))}</span>
+          \${srcBadge}
+          <span class="text-sm font-medium text-white">\${esc(name)}</span>
           <span class="text-xs text-green-400">✔ \${sentCount} enviadas</span>
           \${(h.failed||0) > 0 ? \`<span class="text-xs text-red-400">✘ \${h.failed} falhas</span>\` : ''}
           \${respBadge}
