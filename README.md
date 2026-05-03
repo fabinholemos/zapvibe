@@ -6,7 +6,7 @@ SaaS multi-tenant para disparos em massa, automação de respostas e campanhas i
 
 | Camada | Tecnologia |
 |---|---|
-| Backend | Node.js HTTP nativo (~3700 linhas, `src/dashboard.js`) |
+| Backend | Node.js HTTP nativo (modular: `dashboard.js` + 5 módulos) |
 | Frontend | SPA HTML puro + Tailwind CSS CDN (embutido no backend) |
 | Banco | PostgreSQL via Supabase (session pooler SSL, pool `pg`) |
 | WhatsApp | Evolution API v1.8.7 (serviço separado no Railway) |
@@ -45,12 +45,17 @@ SaaS multi-tenant para disparos em massa, automação de respostas e campanhas i
 
 ```
 zapvibe (Railway)              evolution-api (Railway)
-┌─────────────────────┐        ┌────────────────────────┐
-│  src/dashboard.js   │◄──────►│  Evolution API v1.8.7  │
-│  (HTTP server +     │        │  (Baileys/WhatsApp)     │
-│   SPA + API routes) │        │  /evolution/instances  │
-└────────┬────────────┘        │  (volume persistente)  │
-         │                     └────────────────────────┘
+┌──────────────────────────┐   ┌────────────────────────┐
+│  src/dashboard.js        │◄─►│  Evolution API v1.8.7  │
+│  (HTTP server, rotas,    │   │  (Baileys/WhatsApp)     │
+│   HTML/SPA)              │   │  /evolution/instances  │
+│                          │   │  (volume persistente)  │
+│  src/auth.js             │   └────────────────────────┘
+│  src/whatsapp.js         │
+│  src/campaign.js         │
+│  src/webhook.js          │
+│  src/crons.js            │
+└────────┬─────────────────┘
          ▼
 ┌─────────────────────┐
 │  src/db.js          │
@@ -137,7 +142,12 @@ Requer Evolution API rodando (Docker ou Railway).
 ```
 zapflow/
   src/
-    dashboard.js   — servidor HTTP, SPA, todas as rotas API, crons, webhook
+    dashboard.js   — servidor HTTP, rotas API, HTML/SPA, constantes
+    auth.js        — hashPassword, verifyPassword, sessions, cookies
+    whatsapp.js    — fetchApi, sendWhatsapp, sendWhatsappMedia, applyTemplate, IA
+    campaign.js    — runCampaign, campaigns Map (estado por userId)
+    webhook.js     — processWebhook, configureWebhook, resolveJidForSending
+    crons.js       — checkSchedules, checkVencimentos, checkDrips (setIntervals)
     db.js          — pool pg, init(), todas as funções CRUD
     migrate.js     — script one-shot (migração de dados legados)
   railway.toml

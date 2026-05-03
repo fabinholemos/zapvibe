@@ -2,45 +2,12 @@ require('dotenv').config()
 const http = require('http')
 const { exec } = require('child_process')
 const { parse } = require('csv-parse/sync')
-const crypto = require('crypto')
 const db = require('./db')
-
-// ── Auth helpers ──────────────────────────────────────────────────────────────
-
-function hashPassword(password) {
-  return new Promise((resolve, reject) => {
-    const salt = crypto.randomBytes(16).toString('hex')
-    crypto.scrypt(password, salt, 64, (err, key) => {
-      if (err) reject(err)
-      else resolve(`${salt}:${key.toString('hex')}`)
-    })
-  })
-}
-
-function verifyPassword(password, hash) {
-  return new Promise((resolve, reject) => {
-    const [salt, key] = hash.split(':')
-    crypto.scrypt(password, salt, 64, (err, derived) => {
-      if (err) reject(err)
-      else resolve(derived.toString('hex') === key)
-    })
-  })
-}
-
-function generateToken() {
-  return crypto.randomBytes(32).toString('hex')
-}
-
-function parseCookies(req) {
-  const header = req.headers.cookie || ''
-  return Object.fromEntries(header.split(';').map(c => c.trim().split('=').map(decodeURIComponent)))
-}
-
-async function getAuthSession(req) {
-  const cookies = parseCookies(req)
-  if (!cookies.session) return null
-  return db.getSession(cookies.session)
-}
+const { hashPassword, verifyPassword, generateToken, parseCookies, getAuthSession } = require('./auth')
+const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappMedia, notifyAdminNewUser, detectMediatype, personalizeWithAI, INSTANCE } = require('./whatsapp')
+const { campaigns, getCampaign, runCampaign } = require('./campaign')
+const { processWebhook, configureWebhook, configureWebhookForInstance } = require('./webhook')
+require('./crons')
 
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -111,9 +78,6 @@ document.getElementById('form').onsubmit = async e => {
 </html>`
 
 const PORT = process.env.PORT || 3000
-const API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080'
-const API_KEY = process.env.EVOLUTION_API_KEY || ''
-const INSTANCE = process.env.INSTANCE_NAME || 'minha-empresa'
 
 const DEFAULT_TEMPLATE = `Ola, {nome}! Tudo bem?
 
@@ -121,468 +85,9 @@ Estou entrando em contato para apresentar o ZapVibe, nossa solucao de comunicaca
 
 Posso te mostrar como funciona em poucos minutos?`
 
-const campaigns = new Map() // userId → campaign state
-const mediaStore = new Map() // userId → currentMedia
+const mediaStore = new Map()
 const MEDIA_LIMITS = { image: 5*1024*1024, audio: 10*1024*1024, document: 10*1024*1024, video: 15*1024*1024 }
-const replyTracker = new Map() // phone → timestamp (anti-loop)
-const REPLY_COOLDOWN = 5 * 60 * 1000
 
-function getCampaign(userId) {
-  if (!campaigns.has(userId)) campaigns.set(userId, { running: false, stop: false, total: 0, sent: 0, failed: 0, log: [], results: [] })
-  return campaigns.get(userId)
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-async function resolveJidForSending(jid, pushName, userId, instanceName) {
-  if (!jid.endsWith('@lid')) return jid
-  const lidKey = jid.replace(/@.+/, '')
-
-  const cached = await db.getLidEntry(lidKey, userId)
-  if (cached) { console.log('[LID] cache:', cached); return cached }
-
-  if (pushName) {
-    const words = pushName.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-    const contacts = await db.getContacts(userId)
-    const match = contacts.find(c =>
-      words.length && words.every(w => (c.nome || '').toLowerCase().includes(w))
-    )
-    if (match) {
-      const sendJid = formatPhone(match.telefone) + '@s.whatsapp.net'
-      await db.saveLidEntry(lidKey, sendJid, userId)
-      console.log('[LID] resolvido por nome CSV:', sendJid)
-      return sendJid
-    }
-  }
-
-  try {
-    const evoContacts = await fetchApi(`/contact/findContacts/${instanceName}`, 'GET')
-    if (Array.isArray(evoContacts)) {
-      const firstName = (pushName || '').toLowerCase().split(' ')[0]
-      const match = evoContacts.find(c =>
-        firstName && (c.pushName || c.name || '').toLowerCase().startsWith(firstName) &&
-        (c.id || '').includes('@s.whatsapp.net')
-      )
-      if (match?.id) {
-        await db.saveLidEntry(lidKey, match.id, userId)
-        console.log('[LID] resolvido por contatos Evolution:', match.id)
-        return match.id
-      }
-    }
-  } catch (e) { console.log('[LID] Evolution contacts lookup falhou:', e.message) }
-
-  console.log('[LID] não resolvido, tentando @lid direto (pode falhar)')
-  return jid
-}
-
-async function configureWebhookForInstance(instanceName) {
-  const baseUrl = process.env.WEBHOOK_BASE_URL || `http://localhost:${PORT}`
-  try {
-    const result = await fetchApi(`/webhook/set/${instanceName}`, 'POST', {
-      url: `${baseUrl}/webhook`,
-      enabled: true,
-      webhookByEvents: false,
-      webhook_by_events: false,
-      webhookBase64: false,
-      webhook_base64: false,
-      events: ['MESSAGES_UPSERT', 'GROUPS_UPSERT']
-    })
-    console.log(`✔ Webhook configurado para ${instanceName}:`, JSON.stringify(result).slice(0, 200))
-  } catch (e) {
-    console.log(`⚠ Webhook não configurado para ${instanceName}:`, e.message)
-  }
-}
-
-async function configureWebhook() {
-  const users = await db.getAllUsers().catch(() => [])
-  for (const u of users) {
-    if (u.status !== 'active' && u.role !== 'admin') continue
-    const instances = await db.getUserInstances(u.id).catch(() => [])
-    for (const inst of instances) {
-      await configureWebhookForInstance(inst.instanceName).catch(() => {})
-    }
-  }
-}
-
-async function processWebhook(data) {
-  const evt = (data.event || '').toLowerCase().replace(/\./g, '_')
-  console.log('[Webhook] event:', data.event, '| normalizado:', evt)
-
-  // Auto-capture groups when Baileys syncs them after connect
-  if (evt === 'groups_upsert') {
-    const instanceName = data.instance || INSTANCE
-    const user = await db.getUserByInstance(instanceName).catch(() => null)
-    if (!user) return
-    const groups = (Array.isArray(data.data) ? data.data : [])
-      .filter(g => (g.id || '').endsWith('@g.us'))
-      .map(g => ({
-        jid: g.id,
-        name: g.subject || g.name || g.id,
-        participants: g.size || (Array.isArray(g.participants) ? g.participants.length : 0)
-      })).filter(g => g.jid)
-    if (groups.length) {
-      await db.syncWaGroups(user.id, instanceName, groups).catch(console.error)
-      console.log(`[Webhook] GROUPS_UPSERT: ${groups.length} grupos salvos para ${instanceName}`)
-    }
-    return
-  }
-
-  if (!['messages_upsert', 'messages.upsert'].includes(evt)) return
-  const msg = data.data
-  if (!msg) return
-
-  const jid = msg.key?.remoteJid || ''
-  if (!jid) return
-
-  // captura grupo independente de fromMe (mensagem enviada por você também conta)
-  if (jid.endsWith('@g.us')) {
-    const instName = data.instance || INSTANCE
-    const grpUser = await db.getUserByInstance(instName).catch(() => null)
-    if (grpUser) {
-      const grpName = data.data?.pushName || msg.key?.participant || jid
-      await db.syncWaGroups(grpUser.id, instName, [{ jid, name: grpName, participants: 0 }]).catch(() => {})
-      console.log(`[Webhook] grupo auto-capturado: ${jid} para ${instName}`)
-    }
-    return
-  }
-
-  // ignora fromMe só para auto-respostas (não para grupos)
-  if (msg.key?.fromMe) return
-
-  const instanceName = data.instance || INSTANCE
-  const user = await db.getUserByInstance(instanceName).catch(() => null)
-  if (!user) { console.log('[Webhook] instância sem usuário:', instanceName); return }
-  const userId = user.id
-
-  const pushName = msg.pushName || ''
-  const sendTo = await resolveJidForSending(jid, pushName, userId, instanceName)
-  const phone = sendTo.replace(/@.+/, '')
-
-  const text = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').toLowerCase().trim()
-  console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
-
-  // Opt-out detection — before cooldown check so it always works
-  const OPTOUT_KEYWORDS = ['sair', 'parar', 'stop', 'cancelar', 'remover', 'descadastrar', 'nao quero', 'não quero']
-  if (OPTOUT_KEYWORDS.some(kw => text === kw || text.startsWith(kw + ' ') || text.endsWith(' ' + kw))) {
-    const allCts = await db.getContacts(userId)
-    const optoutContact = allCts.find(c => {
-      const n = c.telefone.replace(/\D/g, '')
-      return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
-    })
-    if (optoutContact) {
-      await db.setOptout(optoutContact.telefone, userId)
-      await sendWhatsapp(sendTo, 'Você foi removido da nossa lista de mensagens e não receberá mais contato. ✓', instanceName).catch(() => {})
-      console.log('[Opt-out]', phone, '| contato:', optoutContact.telefone)
-    }
-    return
-  }
-
-  const lastReply = replyTracker.get(phone)
-  if (lastReply && Date.now() - lastReply < REPLY_COOLDOWN) return
-
-  const logs = await db.getCampaignLog(userId)
-  const phoneLog = logs.slice().reverse().find(l => l.phones.includes(phone))
-  const senderTemplateId = phoneLog?.templateId || null
-
-  // Track response to campaign (once per contact per campaign)
-  if (phoneLog) {
-    db.trackCampaignResponse(phoneLog.id, phone, userId).catch(() => {})
-  }
-
-  const rules = (await db.getAutoreplies(userId)).filter(r => {
-    if (!r.active) return false
-    if (!r.templateId) return true                          // generic rule: always
-    if (senderTemplateId === null) return false             // campaign rule: skip if sender unknown
-    return r.templateId === senderTemplateId                // campaign rule: match only
-  })
-  let matched = null
-
-  for (const rule of rules) {
-    if (rule.trigger === 'any') { matched = rule; break }
-    if (rule.trigger === 'keywords' && rule.keywords?.length) {
-      const hit = rule.keywords.some(kw => text.includes(kw.toLowerCase().trim()))
-      if (hit) { matched = rule; break }
-    }
-  }
-
-  console.log('[Webhook] regras ativas:', rules.length, '| matched:', matched?.name || 'nenhuma')
-  if (!matched) return
-
-  replyTracker.set(phone, Date.now())
-  await sleep(matched.delay || 1500)
-
-  const allContacts = await db.getContacts(userId)
-  const contact = allContacts.find(c => {
-    const n = c.telefone.replace(/\D/g, '')
-    return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
-  }) || { nome: msg.pushName || '', empresa: '', extra: '', telefone: phone }
-  const replyText = applyTemplate(matched.response || '', contact)
-
-  let replyResult
-  if (matched.mediaBase64 && matched.mediaMimetype) {
-    replyResult = await sendWhatsappMedia(sendTo, replyText, {
-      base64: matched.mediaBase64,
-      mimetype: matched.mediaMimetype,
-      filename: matched.mediaFilename || 'arquivo',
-      mediatype: detectMediatype(matched.mediaMimetype)
-    }, instanceName).catch(e => ({ error: e.message }))
-  } else {
-    replyResult = await sendWhatsapp(sendTo, replyText, instanceName).catch(e => ({ error: e.message }))
-  }
-
-  console.log(`[Auto-reply] → ${sendTo} (regra: ${matched.name}) | API:`, JSON.stringify(replyResult))
-}
-
-function applyTemplate(tpl, c) {
-  return tpl
-    .replace(/\{nome\}/gi, c.nome || '')
-    .replace(/\{empresa\}/gi, c.empresa || '')
-    .replace(/\{extra\}/gi, c.extra || '')
-    .replace(/\{telefone\}/gi, c.telefone || '')
-    .replace(/\{vencimento\}/gi, c.vencimento || '')
-}
-
-function formatPhone(phone) {
-  if (phone.includes('@')) return phone // already a full JID (@s.whatsapp.net or @lid)
-  let n = phone.replace(/\D/g, '')
-  if (!n.startsWith('55')) n = '55' + n
-  return n
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
-
-function fetchApi(urlPath, method, body, timeoutMs = 15000) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(API_URL + urlPath)
-    const isHttps = u.protocol === 'https:'
-    const transport = isHttps ? require('https') : require('http')
-    const opts = {
-      hostname: u.hostname, port: u.port || (isHttps ? 443 : 80),
-      path: u.pathname + u.search, method,
-      headers: { apikey: API_KEY, 'Content-Type': 'application/json' }
-    }
-    const req = transport.request(opts, res => {
-      let d = ''
-      res.on('data', c => d += c)
-      res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({}) } })
-    })
-    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error('Evolution API timeout')) })
-    req.on('error', reject)
-    if (body) req.write(JSON.stringify(body))
-    req.end()
-  })
-}
-
-async function sendWhatsapp(phone, text, instanceName) {
-  return fetchApi(`/message/sendText/${instanceName}`, 'POST', { number: formatPhone(phone), textMessage: { text } })
-}
-
-async function sendWhatsappMedia(phone, caption, media, instanceName) {
-  const number = formatPhone(phone)
-  if (media.mediatype === 'audio') {
-    return fetchApi(`/message/sendWhatsAppAudio/${instanceName}`, 'POST', {
-      number, audioMessage: { audio: media.base64 }
-    })
-  }
-  return fetchApi(`/message/sendMedia/${instanceName}`, 'POST', {
-    number,
-    mediaMessage: {
-      mediatype: media.mediatype,
-      mimetype: media.mimetype,
-      caption,
-      media: media.base64,
-      fileName: media.filename
-    }
-  })
-}
-
-async function notifyAdminNewUser(name, email, phone) {
-  const adminPhone = process.env.ADMIN_PHONE
-  const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase()
-  if (!adminPhone || !adminEmail) return
-  const admin = await db.getUserByEmail(adminEmail)
-  if (!admin?.instance_name) return
-  const when = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-  const msg = `🆕 *Novo cadastro no ZapVibe!*\n\n👤 *Nome:* ${name}\n📧 *E-mail:* ${email}\n📱 *Telefone:* ${phone}\n⏰ *Horário:* ${when}\n\nAcesse o painel admin para ativar.`
-  await sendWhatsapp(adminPhone, msg, admin.instance_name)
-}
-
-function detectMediatype(mimetype) {
-  if (mimetype.startsWith('image/')) return 'image'
-  if (mimetype.startsWith('video/')) return 'video'
-  if (mimetype.startsWith('audio/')) return 'audio'
-  return 'document'
-}
-
-async function personalizeWithAI(template, contact) {
-  if (process.env.USE_AI !== 'true' || !process.env.GROQ_API_KEY || process.env.GROQ_API_KEY.includes('sua_')) {
-    return applyTemplate(template, contact)
-  }
-  try {
-    const Groq = require('groq-sdk')
-    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
-      messages: [{ role: 'user', content: `Reescreva de forma natural e personalizada para WhatsApp. Regras OBRIGATÓRIAS:\n- Preserve EXATAMENTE a formatação WhatsApp: *negrito*, _itálico_, quebras de linha\n- Não remova nem altere os asteriscos (*) ou underscores (_) de formatação\n- Mantenha o conteúdo e estrutura da mensagem\n- Sem inventar informações\n\nContato: nome=${contact.nome}, empresa=${contact.empresa||''}, extra=${contact.extra||''}\n\nMensagem original:\n${applyTemplate(template, contact)}\n\nRetorne APENAS a mensagem reescrita, preservando toda formatação.` }],
-      max_tokens: 600, temperature: 0.7
-    })
-    return completion.choices[0]?.message?.content?.trim() || applyTemplate(template, contact)
-  } catch { return applyTemplate(template, contact) }
-}
-
-async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI, media, templateId, templateName, userId, instanceName) {
-  const c_ = getCampaign(userId)
-  c_.running = true
-  c_.stop = false
-  c_.sent = 0
-  c_.failed = 0
-  c_.log = []
-  c_.results = []
-  const slice = contacts.filter(c => !c.optout).slice(0, limit)
-  c_.total = slice.length
-  const sentPhones = []
-  for (let i = 0; i < slice.length; i++) {
-    if (c_.stop) { c_.log.push({ t: 'warn', m: 'Campanha interrompida pelo usuário.' }); break }
-    const c = slice[i]
-    c_.log.push({ t: 'info', m: `[${i+1}/${slice.length}] Enviando para ${c.nome}...` })
-    try {
-      const msg = useAI ? await personalizeWithAI(template, c) : applyTemplate(template, c)
-      if (media) await sendWhatsappMedia(c.telefone, msg, media, instanceName)
-      else await sendWhatsapp(c.telefone, msg, instanceName)
-      c_.sent++
-      sentPhones.push(formatPhone(c.telefone))
-      c_.results.push({ ...c, status: 'enviado', ts: new Date().toLocaleTimeString('pt-BR') })
-      c_.log.push({ t: 'ok', m: `✔ ${c.nome} (${c.telefone})` })
-    } catch (err) {
-      c_.failed++
-      c_.results.push({ ...c, status: 'falhou', erro: err.message, ts: new Date().toLocaleTimeString('pt-BR') })
-      c_.log.push({ t: 'err', m: `✘ ${c.nome}: ${err.message}` })
-    }
-    if (i < slice.length - 1 && !c_.stop) {
-      const d = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin
-      c_.log.push({ t: 'info', m: `⏳ Aguardando ${(d/1000).toFixed(1)}s...` })
-      await sleep(d)
-    }
-  }
-  c_.running = false
-  c_.log.push({ t: 'ok', m: `Campanha finalizada. ${c_.sent} enviadas, ${c_.failed} falhas.` })
-  if (sentPhones.length) {
-    const sentContacts = c_.results.filter(r => r.status === 'enviado').map(r => ({ nome: r.nome, telefone: r.telefone }))
-    await db.addCampaignLog({
-      id: Date.now().toString(),
-      templateId: templateId || null,
-      templateName: templateName || 'Sem nome',
-      phones: sentPhones,
-      contacts: sentContacts,
-      sent: c_.sent,
-      failed: c_.failed,
-      sentAt: new Date().toISOString()
-    }, userId)
-  }
-}
-
-// ── Automações: crons server-side ─────────────────────────────────────────────
-
-function parseVencimentoDate(str) {
-  if (!str) return null
-  // DD/MM/YYYY
-  let m = str.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (m) return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]))
-  // DD/MM (assume current year)
-  m = str.trim().match(/^(\d{1,2})\/(\d{1,2})$/)
-  if (m) return new Date(new Date().getFullYear(), parseInt(m[2]) - 1, parseInt(m[1]))
-  // YYYY-MM-DD
-  m = str.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]))
-  return null
-}
-
-async function checkSchedules() {
-  try {
-    const users = await db.getAllUsers().catch(() => [])
-    for (const user of users) {
-      if (user.status !== 'active' && user.role !== 'admin') continue
-      const schedules = await db.getPendingSchedules(user.id).catch(() => [])
-      for (const s of schedules) {
-        await db.updateScheduleStatus(s.id, 'running')
-        let contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => !c.optout)
-        if (s.group_id) {
-          const groups = await db.getGroups(user.id).catch(() => [])
-          const grp = groups.find(g => g.id === s.group_id)
-          if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))
-        }
-        const instanceName = user.instance_name || INSTANCE
-        runCampaign(contacts, s.template, s.delay_min, s.delay_max, s.daily_limit, s.use_ai, null, s.template_id, s.template_name, user.id, instanceName)
-          .then(() => db.updateScheduleStatus(s.id, 'sent').catch(() => {}))
-          .catch(() => db.updateScheduleStatus(s.id, 'failed').catch(() => {}))
-      }
-    }
-  } catch (e) { console.error('[checkSchedules]', e.message) }
-}
-setInterval(checkSchedules, 60000)
-
-async function checkVencimentos() {
-  try {
-    const today = new Date()
-    const todayStr = today.toISOString().slice(0, 10)
-    const users = await db.getAllUsers().catch(() => [])
-    for (const user of users) {
-      if (user.status !== 'active' && user.role !== 'admin') continue
-      const rules = await db.getVencimentoRules(user.id).catch(() => [])
-      for (const rule of rules) {
-        if (!rule.active || rule.lastRunDate === todayStr) continue
-        const targetDate = new Date(today)
-        targetDate.setDate(targetDate.getDate() + parseInt(rule.daysBefore))
-        const contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => {
-          if (!c.vencimento || c.optout) return false
-          const d = parseVencimentoDate(c.vencimento)
-          if (!d) return false
-          return d.getDate() === targetDate.getDate() && d.getMonth() === targetDate.getMonth()
-        })
-        if (contacts.length) {
-          const instanceName = user.instance_name || INSTANCE
-          runCampaign(contacts, rule.templateContent, 8000, 20000, 500, false, null, rule.templateId, rule.name, user.id, instanceName)
-            .catch(e => console.error('[Vencimento]', e.message))
-        }
-        await db.setVencimentoRuleLastRun(rule.id, todayStr, user.id).catch(() => {})
-      }
-    }
-  } catch (e) { console.error('[checkVencimentos]', e.message) }
-}
-setInterval(checkVencimentos, 3600000)
-checkVencimentos() // run once at startup
-
-async function checkDrips() {
-  try {
-    const users = await db.getAllUsers().catch(() => [])
-    for (const user of users) {
-      if (user.status !== 'active' && user.role !== 'admin') continue
-      const items = await db.getPendingDripItems(user.id).catch(() => [])
-      for (const item of items) {
-        const drip = await db.getDrip(item.drip_id, user.id).catch(() => null)
-        if (!drip) { await db.updateDripItemStatus(item.id, 'skipped').catch(() => {}); continue }
-        const step = drip.steps[item.step_index]
-        if (!step) { await db.updateDripItemStatus(item.id, 'done').catch(() => {}); continue }
-        await db.updateDripItemStatus(item.id, 'running')
-        const contact = { nome: item.nome, telefone: item.phone }
-        const instanceName = user.instance_name || INSTANCE
-        try {
-          await sendWhatsapp(item.phone, applyTemplate(step.message, contact), instanceName)
-          await db.updateDripItemStatus(item.id, 'sent')
-          const nextIdx = item.step_index + 1
-          if (nextIdx < drip.steps.length) {
-            const nextStep = drip.steps[nextIdx]
-            const sendAt = new Date(Date.now() + (nextStep.delayDays || 1) * 86400000).toISOString()
-            await db.addDripQueueItems([{ id: `${Date.now()}_${item.phone}_${nextIdx}`, dripId: item.drip_id, userId: user.id, phone: item.phone, nome: item.nome, stepIndex: nextIdx, sendAt }])
-          }
-        } catch (e) {
-          await db.updateDripItemStatus(item.id, 'failed').catch(() => {})
-        }
-      }
-    }
-  } catch (e) { console.error('[checkDrips]', e.message) }
-}
-setInterval(checkDrips, 60000)
 
 // ── body parser ───────────────────────────────────────────────────────────────
 
@@ -743,6 +248,24 @@ textarea{resize:vertical}
           <p class="text-xs text-gray-500 mt-0.5">Envie uma série de mensagens ao longo de dias para nutrir contatos</p>
         </div>
         <button onclick="openDripForm()" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg">+ Nova sequência</button>
+      </div>
+
+      <!-- Drip start modal -->
+      <div id="drip-start-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm space-y-4">
+          <p class="text-sm font-semibold">▶ Iniciar sequência</p>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1.5">Enviar para</label>
+            <select id="drip-start-group" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+              <option value="">Todos os contatos</option>
+            </select>
+          </div>
+          <p class="text-xs text-gray-500">A 1ª mensagem será enviada agora. As demais serão enviadas automaticamente nos dias configurados.</p>
+          <div class="flex gap-2">
+            <button onclick="confirmStartDrip()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Iniciar</button>
+            <button onclick="closeDripStartModal()" class="flex-1 py-2 bg-gray-700 text-gray-300 text-sm rounded-xl">Cancelar</button>
+          </div>
+        </div>
       </div>
 
       <!-- New drip form -->
@@ -2515,7 +2038,14 @@ async function deleteVencRule(id) {
 // ── Drip campaigns ────────────────────────────────────────────────────────────
 let dripSteps = []
 
-function openDripForm() { dripSteps=[]; document.getElementById('df-steps').innerHTML=''; document.getElementById('drip-form').classList.remove('hidden') }
+function openDripForm() {
+  dripSteps = [
+    { delayDays: 0, message: '' },
+    { delayDays: 3, message: '' }
+  ]
+  document.getElementById('drip-form').classList.remove('hidden')
+  renderDripSteps()
+}
 function closeDripForm() { document.getElementById('drip-form').classList.add('hidden'); document.getElementById('df-name').value=''; dripSteps=[] }
 
 function addDripStep() {
@@ -2525,16 +2055,30 @@ function addDripStep() {
 }
 
 function renderDripSteps() {
-  document.getElementById('df-steps').innerHTML = dripSteps.map((s, i) => \`
-    <div class="bg-gray-900 rounded-xl p-3 space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-medium text-gray-300">Etapa \${i+1}</span>
-        <button onclick="removeDripStep(\${i})" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+  let cumDays = 0
+  document.getElementById('df-steps').innerHTML = dripSteps.map((s, i) => {
+    if (i > 0) cumDays += s.delayDays
+    const dayLabel = i === 0 ? 'Dia 0 — enviado imediatamente ao iniciar' : \`Dia +\${cumDays} após o início\`
+    return \`
+    <div class="flex gap-2">
+      <div class="flex flex-col items-center pt-1">
+        <div class="w-6 h-6 rounded-full bg-violet-700 text-white text-xs flex items-center justify-center font-bold flex-shrink-0">\${i+1}</div>
+        \${i < dripSteps.length-1 ? '<div class="w-px flex-1 bg-gray-700 mt-1 mb-1"></div>' : ''}
       </div>
-      \${i > 0 ? \`<div class="flex items-center gap-2"><label class="text-xs text-gray-500 whitespace-nowrap">Enviar</label><input type="number" value="\${s.delayDays}" min="1" onchange="dripSteps[\${i}].delayDays=+this.value" class="w-20 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-500"/><label class="text-xs text-gray-500">dias após etapa anterior</label></div>\` : '<p class="text-xs text-gray-500">Enviado na hora do início</p>'}
-      <textarea rows="3" placeholder="Mensagem (use {nome}, {empresa}...)" onchange="dripSteps[\${i}].message=this.value" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-violet-500 resize-none">\${esc(s.message)}</textarea>
-    </div>
-  \`).join('')
+      <div class="flex-1 bg-gray-900 rounded-xl p-3 space-y-2 mb-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs text-violet-400 font-medium">\${dayLabel}</span>
+          \${dripSteps.length > 1 ? \`<button onclick="removeDripStep(\${i})" class="text-gray-600 hover:text-red-400 text-xs">✕</button>\` : ''}
+        </div>
+        \${i > 0 ? \`<div class="flex items-center gap-2">
+          <label class="text-xs text-gray-500 whitespace-nowrap">Enviar</label>
+          <input type="number" value="\${s.delayDays}" min="1" oninput="dripSteps[\${i}].delayDays=Math.max(1,+this.value||1); renderDripSteps()" class="w-16 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-500"/>
+          <label class="text-xs text-gray-500">dias depois da etapa anterior</label>
+        </div>\` : ''}
+        <textarea rows="3" placeholder="Mensagem (use {nome}, {empresa}, {extra}...)" oninput="dripSteps[\${i}].message=this.value" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-violet-500 resize-none">\${esc(s.message)}</textarea>
+      </div>
+    </div>\`
+  }).join('')
 }
 
 function removeDripStep(i) { dripSteps.splice(i, 1); renderDripSteps() }
@@ -2556,31 +2100,55 @@ async function loadDrips() {
   const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
   el.innerHTML = drips.map(d => {
     const steps = Array.isArray(d.steps) ? d.steps : []
+    let cum = 0
+    const timeline = steps.map((s, i) => {
+      if (i > 0) cum += (s.delayDays || 1)
+      const dayTag = i === 0 ? 'Dia 0' : \`Dia +\${cum}\`
+      const preview = (s.message || '').slice(0, 40) + ((s.message||'').length > 40 ? '…' : '')
+      return \`<div class="flex items-start gap-2">
+        <span class="text-xs text-violet-400 whitespace-nowrap font-medium w-12">\${dayTag}</span>
+        <span class="text-xs text-gray-400">\${esc(preview) || '<em class="text-gray-600">sem mensagem</em>'}</span>
+      </div>\`
+    }).join('')
     return \`
-    <div class="bg-gray-800 rounded-xl px-3 py-3 space-y-2">
+    <div class="bg-gray-800 rounded-xl px-4 py-3 space-y-3">
       <div class="flex items-center justify-between">
         <div>
-          <p class="text-xs font-medium">\${esc(d.name)}</p>
+          <p class="text-xs font-semibold">\${esc(d.name)}</p>
           <p class="text-xs text-gray-500">\${steps.length} etapa\${steps.length!==1?'s':''}</p>
         </div>
         <div class="flex items-center gap-2">
           <button onclick="startDrip('\${d.id}')" class="text-xs px-2.5 py-1 bg-violet-700 hover:bg-violet-600 text-white rounded-lg">▶ Iniciar</button>
-          <button onclick="deleteDrip('\${d.id}')" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+          <button onclick="deleteDrip('\${d.id}')" class="text-gray-600 hover:text-red-400 text-xs px-1">✕</button>
         </div>
       </div>
+      <div class="border-t border-gray-700 pt-2 space-y-1.5">\${timeline}</div>
     </div>\`
   }).join('')
 }
 
+let _dripStartId = null
 async function startDrip(id) {
+  _dripStartId = id
   const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
-  const opts = ['<option value="">Todos os contatos</option>', ...groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`)].join('')
-  const groupId = prompt(\`Iniciar sequência para qual grupo?\\n\\n\${groups.map((g,i)=>(i+1)+'. '+g.name).join('\\n')}\\n\\n(deixe vazio para todos)\\n\\nDigite o número do grupo ou deixe em branco:\`)
-  if (groupId === null) return
-  const grp = groups[parseInt(groupId)-1]
-  const body = grp ? { groupId: grp.id } : {}
-  const r = await fetch(\`/api/drips/\${id}/start\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r=>r.json())
-  alert(\`Sequência iniciada para \${r.enrolled} contatos!\`)
+  const sel = document.getElementById('drip-start-group')
+  sel.innerHTML = '<option value="">Todos os contatos</option>' + groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`).join('')
+  document.getElementById('drip-start-modal').classList.remove('hidden')
+}
+function closeDripStartModal() { document.getElementById('drip-start-modal').classList.add('hidden'); _dripStartId = null }
+async function confirmStartDrip() {
+  const groupId = document.getElementById('drip-start-group').value
+  const body = groupId ? { groupId } : {}
+  const btn = document.querySelector('#drip-start-modal button')
+  btn.disabled = true; btn.textContent = 'Iniciando...'
+  const r = await fetch(\`/api/drips/\${_dripStartId}/start\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r=>r.json()).catch(()=>({}))
+  closeDripStartModal()
+  const msg = r.enrolled != null ? \`✔ Sequência iniciada para \${r.enrolled} contato\${r.enrolled!==1?'s':''}!\` : '❌ Erro ao iniciar sequência.'
+  const toast = document.createElement('div')
+  toast.className = 'fixed bottom-4 right-4 bg-gray-800 border border-gray-700 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg z-50'
+  toast.textContent = msg
+  document.body.appendChild(toast)
+  setTimeout(() => toast.remove(), 3500)
 }
 
 async function deleteDrip(id) {
