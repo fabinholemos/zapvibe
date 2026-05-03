@@ -705,13 +705,14 @@ textarea{resize:vertical}
       </div>
     </div>
 
-    <!-- Sequência drip -->
+    <!-- Seguimento automático -->
     <div class="border-t border-gray-700 pt-4 mt-2">
-      <label class="text-xs text-gray-500 mb-1 block">🔁 Sequência automática após resposta (opcional)</label>
-      <select id="ar-drip" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm mb-1 focus:outline-none focus:border-violet-500">
-        <option value="">Nenhuma</option>
-      </select>
-      <p class="text-xs text-gray-600">Quando alguém acionar esta regra, será inscrito automaticamente na sequência.</p>
+      <div class="flex items-center justify-between mb-2">
+        <label class="text-xs text-gray-500">↩ Mensagens de seguimento (opcional)</label>
+        <button onclick="addFollowupStep()" class="text-xs px-2.5 py-1 bg-gray-800 hover:bg-gray-700 text-violet-400 rounded-lg">+ Adicionar</button>
+      </div>
+      <div id="ar-followup-steps" class="space-y-2"></div>
+      <p class="text-xs text-gray-600 mt-1">Enviadas automaticamente em horas após a resposta inicial.</p>
     </div>
 
     <div class="flex gap-2 mt-4">
@@ -1512,6 +1513,7 @@ function setTrigger(type) {
 }
 
 let _schedDays = null // null = always, array = specific days
+let _followupSteps = [] // [{ delayHours, message }]
 
 function setSchedPreset(preset) {
   ['always','weekdays','weekend','custom'].forEach(p => {
@@ -1571,19 +1573,16 @@ function openAutoModal(rule) {
       templates.map(t => '<option value="' + t.id + '">' + esc(t.name) + '</option>').join('')
     sel.value = rule?.templateId || ''
   })
-  // Drips
-  fetch('/api/drips').then(r=>r.json()).then(drips => {
-    const sel = document.getElementById('ar-drip')
-    sel.innerHTML = '<option value="">Nenhuma</option>' +
-      drips.map(d => \`<option value="\${d.id}">\${esc(d.name)}</option>\`).join('')
-    sel.value = rule?.dripId || ''
-  })
+  // Follow-up steps
+  _followupSteps = rule?.followupSteps ? [...rule.followupSteps] : []
+  renderFollowupSteps()
   document.getElementById('auto-modal').classList.remove('hidden')
 }
 
 function closeAutoModal() {
   document.getElementById('auto-modal').classList.add('hidden')
   arMediaData = null
+  _followupSteps = []
 }
 
 function uploadAutoMedia(e) {
@@ -1617,7 +1616,7 @@ async function saveAutoRule() {
   const timeStart = document.getElementById('ar-time-start').value
   const timeEnd = document.getElementById('ar-time-end').value
   const hasTimeRange = timeStart && timeEnd && timeStart !== timeEnd
-  const dripSel = document.getElementById('ar-drip')
+  const validFollowups = _followupSteps.filter(s => s.message.trim() && s.delayHours > 0)
   const payload = {
     name, trigger, keywords,
     templateId, templateName,
@@ -1631,7 +1630,7 @@ async function saveAutoRule() {
     activeStart: hasTimeRange ? timeStart : null,
     activeEnd: hasTimeRange ? timeEnd : null,
     offHoursMsg: document.getElementById('ar-off-hours').value.trim() || null,
-    dripId: dripSel.value || null
+    followupSteps: validFollowups
   }
   if (id) {
     await fetch('/api/autoreplies/' + id, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) })
@@ -2130,6 +2129,32 @@ async function deleteVencRule(id) {
   if (!confirm('Excluir esta regra?')) return
   await fetch(\`/api/vencimento-rules/\${id}\`, { method:'DELETE' })
   loadVencimentoRules()
+}
+
+// ── Auto-reply follow-up steps ────────────────────────────────────────────────
+
+function addFollowupStep() {
+  _followupSteps.push({ delayHours: _followupSteps.length === 0 ? 1 : 24, message: '' })
+  renderFollowupSteps()
+}
+
+function removeFollowupStep(i) { _followupSteps.splice(i, 1); renderFollowupSteps() }
+
+function renderFollowupSteps() {
+  const el = document.getElementById('ar-followup-steps')
+  if (!_followupSteps.length) { el.innerHTML = '<p class="text-xs text-gray-700 text-center py-2">Nenhum seguimento configurado.</p>'; return }
+  el.innerHTML = _followupSteps.map((s, i) => \`
+    <div class="bg-gray-800/60 border border-gray-700 rounded-xl p-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-gray-500 shrink-0">↩ Etapa \${i+1} — enviar após</span>
+        <input type="number" value="\${s.delayHours}" min="1" max="720" oninput="_followupSteps[\${i}].delayHours=Math.max(1,+this.value||1)"
+          class="w-16 bg-gray-700 border border-gray-600 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-violet-500"/>
+        <span class="text-xs text-gray-500">hora(s)</span>
+        <button onclick="removeFollowupStep(\${i})" class="ml-auto text-gray-600 hover:text-red-400 text-xs">✕</button>
+      </div>
+      <textarea rows="2" placeholder="Mensagem (use {nome}, {empresa}...)" oninput="_followupSteps[\${i}].message=this.value"
+        class="w-full bg-gray-700 border border-gray-600 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-violet-500 resize-none">\${esc(s.message)}</textarea>
+    </div>\`).join('')
 }
 
 // ── Drip campaigns ────────────────────────────────────────────────────────────

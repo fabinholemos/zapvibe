@@ -1,5 +1,5 @@
 const db = require('./db')
-const { sendWhatsapp, applyTemplate, INSTANCE } = require('./whatsapp')
+const { sendWhatsapp, sendWhatsappMedia, applyTemplate, INSTANCE } = require('./whatsapp')
 const { runCampaign } = require('./campaign')
 
 function parseVencimentoDate(str) {
@@ -109,9 +109,40 @@ async function checkDrips() {
   } catch (e) { console.error('[checkDrips]', e.message) }
 }
 
+async function checkFollowups() {
+  try {
+    const users = await db.getAllUsers().catch(() => [])
+    for (const user of users) {
+      if (user.status !== 'active' && user.role !== 'admin') continue
+      const items = await db.getPendingFollowups(user.id).catch(() => [])
+      for (const item of items) {
+        await db.updateFollowupStatus(item.id, 'running')
+        const contact = { nome: item.nome, telefone: item.phone }
+        const instanceName = item.instance_name || user.instance_name || INSTANCE
+        try {
+          await sendWhatsapp(item.phone, item.message, instanceName)
+          await db.updateFollowupStatus(item.id, 'sent')
+          await db.addCampaignLog({
+            id: `fup_${item.id}`,
+            templateId: null,
+            templateName: `↩ Seguimento — Etapa ${item.step_index + 1}`,
+            phones: [item.phone.replace(/\D/g, '')],
+            contacts: [contact],
+            sent: 1, failed: 0,
+            sentAt: new Date().toISOString()
+          }, user.id).catch(() => {})
+        } catch (e) {
+          await db.updateFollowupStatus(item.id, 'failed').catch(() => {})
+        }
+      }
+    }
+  } catch (e) { console.error('[checkFollowups]', e.message) }
+}
+
 setInterval(checkSchedules, 60000)
 setInterval(checkVencimentos, 3600000)
 checkVencimentos()
 setInterval(checkDrips, 60000)
+setInterval(checkFollowups, 60000)
 
-module.exports = { parseVencimentoDate, checkSchedules, checkVencimentos, checkDrips }
+module.exports = { parseVencimentoDate, checkSchedules, checkVencimentos, checkDrips, checkFollowups }

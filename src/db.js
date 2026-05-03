@@ -179,6 +179,19 @@ async function init() {
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS active_end TEXT;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS drip_id TEXT;
     ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS off_hours_msg TEXT;
+    ALTER TABLE autoreplies ADD COLUMN IF NOT EXISTS followup_steps TEXT;
+    CREATE TABLE IF NOT EXISTS autoreply_followup_queue (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      rule_id TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      nome TEXT DEFAULT '',
+      instance_name TEXT NOT NULL,
+      step_index INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      send_at TIMESTAMPTZ NOT NULL,
+      status TEXT DEFAULT 'pending'
+    );
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE campaign_log ADD COLUMN IF NOT EXISTS responses INTEGER DEFAULT 0;
     ALTER TABLE groups_table ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
@@ -353,15 +366,16 @@ async function getAutoreplies(userId) {
     activeStart: r.active_start || null,
     activeEnd: r.active_end || null,
     dripId: r.drip_id || null,
-    offHoursMsg: r.off_hours_msg || null
+    offHoursMsg: r.off_hours_msg || null,
+    followupSteps: r.followup_steps ? JSON.parse(r.followup_steps) : []
   }))
 }
 
 async function addAutoreply(r, userId) {
   await pool.query(
     `INSERT INTO autoreplies
-      (id, user_id, name, trigger, keywords, response, delay, active, media_base64, media_mimetype, media_filename, created_at, template_id, template_name, active_days, active_start, active_end, drip_id, off_hours_msg)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      (id, user_id, name, trigger, keywords, response, delay, active, media_base64, media_mimetype, media_filename, created_at, template_id, template_name, active_days, active_start, active_end, drip_id, off_hours_msg, followup_steps)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
     [
       r.id, userId, r.name, r.trigger,
       JSON.stringify(r.keywords || []),
@@ -370,7 +384,8 @@ async function addAutoreply(r, userId) {
       r.createdAt, r.templateId || null, r.templateName || null,
       r.activeDays ? JSON.stringify(r.activeDays) : null,
       r.activeStart || null, r.activeEnd || null,
-      r.dripId || null, r.offHoursMsg || null
+      r.dripId || null, r.offHoursMsg || null,
+      r.followupSteps?.length ? JSON.stringify(r.followupSteps) : null
     ]
   )
 }
@@ -384,8 +399,9 @@ async function updateAutoreply(id, updates, userId) {
       name=$1, trigger=$2, keywords=$3, response=$4, delay=$5, active=$6,
       media_base64=$7, media_mimetype=$8, media_filename=$9,
       template_id=$10, template_name=$11,
-      active_days=$12, active_start=$13, active_end=$14, drip_id=$15, off_hours_msg=$16
-     WHERE id=$17 AND user_id=$18`,
+      active_days=$12, active_start=$13, active_end=$14, drip_id=$15, off_hours_msg=$16,
+      followup_steps=$17
+     WHERE id=$18 AND user_id=$19`,
     [
       updates.name       ?? cur.name,
       updates.trigger    ?? cur.trigger,
@@ -403,6 +419,7 @@ async function updateAutoreply(id, updates, userId) {
       updates.activeEnd      !== undefined ? updates.activeEnd      : cur.active_end,
       updates.dripId         !== undefined ? updates.dripId         : cur.drip_id,
       updates.offHoursMsg    !== undefined ? updates.offHoursMsg    : cur.off_hours_msg,
+      updates.followupSteps  !== undefined ? (updates.followupSteps?.length ? JSON.stringify(updates.followupSteps) : null) : cur.followup_steps,
       id, userId
     ]
   )
@@ -836,6 +853,30 @@ async function updateDripItemStatus(id, status) {
   await pool.query('UPDATE drip_queue SET status=$1 WHERE id=$2', [status, id])
 }
 
+// ── Autoreply followup queue ──────────────────────────────────────────────────
+
+async function addFollowupItems(items) {
+  for (const item of items) {
+    await pool.query(
+      `INSERT INTO autoreply_followup_queue (id, user_id, rule_id, phone, nome, instance_name, step_index, message, send_at, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') ON CONFLICT (id) DO NOTHING`,
+      [item.id, item.userId, item.ruleId, item.phone, item.nome || '', item.instanceName, item.stepIndex, item.message, item.sendAt]
+    )
+  }
+}
+
+async function getPendingFollowups(userId) {
+  const { rows } = await pool.query(
+    `SELECT * FROM autoreply_followup_queue WHERE user_id=$1 AND status='pending' AND send_at <= NOW() ORDER BY send_at LIMIT 100`,
+    [userId]
+  )
+  return rows
+}
+
+async function updateFollowupStatus(id, status) {
+  await pool.query('UPDATE autoreply_followup_queue SET status=$1 WHERE id=$2', [status, id])
+}
+
 module.exports = {
   init, ping,
   getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout,
@@ -850,6 +891,7 @@ module.exports = {
   getSchedules, getPendingSchedules, addSchedule, updateScheduleStatus, deleteSchedule,
   getVencimentoRules, addVencimentoRule, updateVencimentoRule, deleteVencimentoRule, setVencimentoRuleLastRun,
   getDrips, getDrip, addDrip, updateDrip, deleteDrip, getDripQueue, getPendingDripItems, addDripQueueItems, updateDripItemStatus,
+  addFollowupItems, getPendingFollowups, updateFollowupStatus,
   upsertUser, getUserByEmail, getUserByInstance, getUserById, getAllUsers, updateUser, deleteUser, registerUser,
   createSession, getSession, deleteSession
 }

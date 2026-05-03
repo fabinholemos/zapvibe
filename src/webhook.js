@@ -227,27 +227,26 @@ async function processWebhook(data) {
 
   console.log(`[Auto-reply] → ${sendTo} (regra: ${matched.name}) | API:`, JSON.stringify(replyResult))
 
-  // Drip enrollment — queue all steps for this contact
-  if (matched.dripId) {
-    const drip = await db.getDrip(matched.dripId, userId).catch(() => null)
-    if (drip?.steps?.length) {
-      const queue = await db.getDripQueue(userId, matched.dripId).catch(() => [])
-      const alreadyEnrolled = queue.some(item => item.phone === phone)
-      if (!alreadyEnrolled) {
-        let cumMs = 0
-        const items = drip.steps.map((s, i) => {
-          if (i > 0) cumMs += (s.delayDays || 1) * 86400000
-          return {
-            id: `ar_${Date.now()}_${phone}_${i}_${matched.dripId}`,
-            dripId: matched.dripId, userId,
-            phone, nome: contact.nome || '',
-            stepIndex: i,
-            sendAt: new Date(Date.now() + cumMs).toISOString()
-          }
-        })
-        await db.addDripQueueItems(items).catch(() => {})
-        console.log(`[Auto-reply] drip enrolled: ${phone} → ${drip.name} (${items.length} etapas)`)
-      }
+  // Follow-up steps — queue hour-based follow-up messages for this contact
+  if (matched.followupSteps?.length) {
+    const existing = await db.getPendingFollowups(userId).catch(() => [])
+    const alreadyEnrolled = existing.some(item => item.phone === phone && item.rule_id === matched.id)
+    if (!alreadyEnrolled) {
+      let cumMs = 0
+      const items = matched.followupSteps.map((s, i) => {
+        cumMs += (s.delayHours || 1) * 3600000
+        return {
+          id: `fup_${Date.now()}_${phone}_${i}_${matched.id}`,
+          userId, ruleId: matched.id,
+          phone, nome: contact.nome || '',
+          instanceName,
+          stepIndex: i,
+          message: applyTemplate(s.message || '', contact),
+          sendAt: new Date(Date.now() + cumMs).toISOString()
+        }
+      })
+      await db.addFollowupItems(items).catch(() => {})
+      console.log(`[Auto-reply] followup enrolled: ${phone} → ${matched.name} (${items.length} etapas)`)
     }
   }
 }
