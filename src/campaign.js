@@ -18,6 +18,17 @@ async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI,
   c_.results = []
   const slice = contacts.filter(c => !c.optout).slice(0, limit)
   c_.total = slice.length
+  const logId = Date.now().toString()
+  // Write log entry upfront so webhook knows these phones belong to this campaign
+  await db.addCampaignLog({
+    id: logId,
+    templateId: templateId || null,
+    templateName: templateName || 'Sem nome',
+    phones: slice.map(c => formatPhone(c.telefone)),
+    contacts: slice.map(c => ({ nome: c.nome, telefone: c.telefone })),
+    sent: 0, failed: 0,
+    sentAt: new Date().toISOString()
+  }, userId).catch(() => {})
   const sentPhones = []
   for (let i = 0; i < slice.length; i++) {
     if (c_.stop) { c_.log.push({ t: 'warn', m: 'Campanha interrompida pelo usuário.' }); break }
@@ -44,19 +55,8 @@ async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI,
   }
   c_.running = false
   c_.log.push({ t: 'ok', m: `Campanha finalizada. ${c_.sent} enviadas, ${c_.failed} falhas.` })
-  if (sentPhones.length) {
-    const sentContacts = c_.results.filter(r => r.status === 'enviado').map(r => ({ nome: r.nome, telefone: r.telefone }))
-    await db.addCampaignLog({
-      id: Date.now().toString(),
-      templateId: templateId || null,
-      templateName: templateName || 'Sem nome',
-      phones: sentPhones,
-      contacts: sentContacts,
-      sent: c_.sent,
-      failed: c_.failed,
-      sentAt: new Date().toISOString()
-    }, userId)
-  }
+  // Update final counts on the log entry created at start
+  await db.updateCampaignLogCounts(logId, c_.sent, c_.failed, userId).catch(() => {})
 }
 
 module.exports = { campaigns, getCampaign, runCampaign }

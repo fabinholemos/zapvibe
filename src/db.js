@@ -445,6 +445,10 @@ async function getCampaignLog(userId) {
   return rows
 }
 
+async function updateCampaignLogCounts(id, sent, failed, userId) {
+  await pool.query('UPDATE campaign_log SET sent=$1, failed=$2 WHERE id=$3 AND user_id=$4', [sent, failed, id, userId])
+}
+
 async function addCampaignLog(entry, userId) {
   await pool.query(
     `INSERT INTO campaign_log (id, user_id, template_id, template_name, phones, contacts_data, sent, failed, sent_at)
@@ -888,7 +892,7 @@ module.exports = {
   getDraft, saveDraft,
   getTemplates, getTemplateById, addTemplate, updateTemplate, deleteTemplate,
   getAutoreplies, addAutoreply, updateAutoreply, deleteAutoreply,
-  getCampaignLog, addCampaignLog, trackCampaignResponse,
+  getCampaignLog, addCampaignLog, updateCampaignLogCounts, trackCampaignResponse,
   getGroups, addGroup, updateGroup, deleteGroup,
   getLidEntry, saveLidEntry,
   getWaGroups, syncWaGroups,
