@@ -162,9 +162,6 @@ async function processWebhook(data) {
     return
   }
 
-  const lastReply = replyTracker.get(phone)
-  if (lastReply && Date.now() - lastReply < REPLY_COOLDOWN) return
-
   const logs = await db.getCampaignLog(userId)
   const phoneLog = logs.slice().reverse().find(l => l.phones.includes(phone))
   const senderTemplateId = phoneLog?.templateId || null
@@ -182,11 +179,19 @@ async function processWebhook(data) {
   })
   let matched = null
 
+  // Keywords rules checked first so menu + option flow works without cooldown blocking
   for (const rule of rules) {
-    if (rule.trigger === 'any') { matched = rule; break }
     if (rule.trigger === 'keywords' && rule.keywords?.length) {
       const hit = rule.keywords.some(kw => text.includes(kw.toLowerCase().trim()))
       if (hit) { matched = rule; break }
+    }
+  }
+  // "any" trigger only if no keyword rule matched — and apply cooldown to prevent loop
+  if (!matched) {
+    const lastReply = replyTracker.get(phone)
+    if (lastReply && Date.now() - lastReply < REPLY_COOLDOWN) return
+    for (const rule of rules) {
+      if (rule.trigger === 'any') { matched = rule; break }
     }
   }
 
