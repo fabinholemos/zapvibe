@@ -3017,7 +3017,15 @@ const server = http.createServer(async (req, res) => {
       mediaBase64: body.mediaBase64 || null,
       mediaMimetype: body.mediaMimetype || null,
       mediaFilename: body.mediaFilename || null,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      templateId: body.templateId || null,
+      templateName: body.templateName || null,
+      activeDays: body.activeDays || null,
+      activeStart: body.activeStart || null,
+      activeEnd: body.activeEnd || null,
+      offHoursMsg: body.offHoursMsg || null,
+      followupSteps: body.followupSteps || [],
+      instanceName: body.instanceName || null
     }
     await db.addAutoreply(rule, userId)
     json(rule); return
