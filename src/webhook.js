@@ -182,10 +182,16 @@ async function processWebhook(data) {
 
   const rules = (await db.getAutoreplies(userId)).filter(r => {
     if (!r.active) return false
-    if (r.instanceName && r.instanceName !== instanceName) return false  // instance filter
-    if (!r.templateId) return senderTemplateId === null     // global rule: only organic (no campaign history)
-    if (senderTemplateId === null) return false             // campaign rule: skip if sender unknown
-    return r.templateId === senderTemplateId                // campaign rule: match only
+    if (r.instanceName && r.instanceName !== instanceName) return false
+    if (!r.templateId) {
+      // "any" trigger: only organic (prevents menu firing for campaign contacts)
+      if (r.trigger === 'any') return senderTemplateId === null
+      // keyword trigger global: fires for everyone (organic + any campaign)
+      return true
+    }
+    // campaign-specific rule: only if sender came from that exact campaign
+    if (senderTemplateId === null) return false
+    return r.templateId === senderTemplateId
   })
   let matched = null
 
