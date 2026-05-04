@@ -834,15 +834,18 @@ async function loadInstances() {
     fetch('/api/me').then(r=>r.json()).catch(()=>({}))
   ])
   const maxInst = me.max_instances || 1
+  const activeInstances = instances.filter(i => i.enabled !== false)
   const quota = document.getElementById('inst-quota')
-  if (quota) quota.textContent = \`\${instances.length} de \${maxInst} instância\${maxInst!==1?'s':''} ativas no seu plano\`
+  if (quota) quota.textContent = \`\${instances.length} de \${maxInst} instância\${maxInst!==1?'s':''} cadastrada\${maxInst!==1?'s':''} no seu plano · \${activeInstances.length} habilitada\${activeInstances.length!==1?'s':''}\`
   const addBtn = document.getElementById('btn-add-inst')
   if (addBtn) addBtn.classList.toggle('hidden', instances.length >= maxInst)
 
   // Populate campaign instance selector
   const campInst = document.getElementById('camp-instance')
-  if (campInst && instances.length > 0) {
-    campInst.innerHTML = instances.map(i => \`<option value="\${esc(i.instanceName)}">📱 \${esc(i.label||i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
+  if (campInst) {
+    campInst.innerHTML = activeInstances.length
+      ? activeInstances.map(i => \`<option value="\${esc(i.instanceName)}">WA \${esc(i.label||i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
+      : '<option value="">Nenhum WhatsApp habilitado</option>'
   }
 
   const list = document.getElementById('inst-list')
@@ -854,31 +857,33 @@ async function loadInstances() {
 
   // Render each instance card, fetch status in parallel
   list.innerHTML = instances.map(inst => \`
-    <div id="ic-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}" class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+    <div id="ic-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}" class="bg-gray-900 border border-gray-800 rounded-2xl p-4 \${inst.enabled===false?'opacity-60':''}">
       <div class="flex items-center justify-between gap-3">
         <div class="flex items-center gap-3 min-w-0">
-          <span class="w-3 h-3 rounded-full bg-gray-600 flex-shrink-0" id="dot-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}"></span>
+          <span class="w-3 h-3 rounded-full \${inst.enabled===false?'bg-amber-500':'bg-gray-600'} flex-shrink-0" id="dot-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}"></span>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium" id="lbl-\${inst.instanceName.replace(/[^a-z0-9]/gi,'_')}">\${esc(inst.label||'WhatsApp')}</span>
-              <button onclick="renameInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-violet-400 text-xs">✎</button>
+              <button onclick="renameInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-violet-400 text-xs">Editar</button>
+              \${inst.enabled===false ? '<span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">Desabilitado</span>' : ''}
             </div>
             <p class="text-xs font-mono text-gray-500">\${esc(inst.instanceName)}</p>
           </div>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
+          <button onclick="toggleInstanceEnabled('\${esc(inst.instanceName)}', \${inst.enabled===false?'true':'false'})" class="px-3 py-1.5 \${inst.enabled===false?'bg-green-600 hover:bg-green-500 text-white':'bg-amber-600 hover:bg-amber-500 text-white'} text-xs font-medium rounded-lg transition-colors">\${inst.enabled===false?'Habilitar':'Desabilitar'}</button>
           <button onclick="connectInstance('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors">QR / Conectar</button>
-
           <button onclick="disconnectInstance('\${esc(inst.instanceName)}')" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg transition-colors">Desconectar</button>
-          \${instances.length > 1 ? \`<button onclick="removeInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-red-400 text-xs px-1">✕</button>\` : ''}
+          \${instances.length > 1 ? \`<button onclick="removeInstance('\${esc(inst.instanceName)}')" class="text-gray-600 hover:text-red-400 text-xs px-1">X</button>\` : ''}
         </div>
       </div>
     </div>
   \`).join('')
 
-  // Fetch status for each instance
+  // Fetch status for each enabled instance
   for (const inst of instances) {
     const safeId = inst.instanceName.replace(/[^a-z0-9]/gi,'_')
+    if (inst.enabled === false) continue
     fetch(\`/api/instances/\${encodeURIComponent(inst.instanceName)}/status\`)
       .then(r=>r.json())
       .then(r => {
@@ -906,6 +911,17 @@ async function renameInstance(instanceName) {
   loadInstances()
 }
 
+async function toggleInstanceEnabled(instanceName, enabled) {
+  const action = enabled ? 'habilitar' : 'desabilitar'
+  if (!confirm(\`Deseja \${action} esta conta WhatsApp?\`)) return
+  const r = await fetch(\`/api/instances/\${encodeURIComponent(instanceName)}/enabled\`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ enabled })
+  }).then(r=>r.json()).catch(e=>({ error: e.message }))
+  if (r.error) { alert(r.error); return }
+  loadInstances()
+}
 let _qrPollTimer = null
 async function connectInstance(instanceName) {
   if (_qrPollTimer) { clearInterval(_qrPollTimer); _qrPollTimer = null }
@@ -1585,9 +1601,10 @@ function openAutoModal(rule) {
   // Instances
   fetch('/api/instances').then(r=>r.json()).then(instances => {
     const sel = document.getElementById('ar-instance')
-    sel.innerHTML = '<option value="">Todos os números</option>' +
-      instances.map(i => \`<option value="\${i.instanceName}">\${esc(i.label || i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
-    sel.value = rule?.instanceName || ''
+    const enabledInstances = instances.filter(i => i.enabled !== false)
+    sel.innerHTML = '<option value="">Todos os números habilitados</option>' +
+      enabledInstances.map(i => \`<option value="\${i.instanceName}">\${esc(i.label || i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
+    sel.value = enabledInstances.some(i => i.instanceName === rule?.instanceName) ? rule.instanceName : ''
   })
   // Templates
   fetch('/api/templates').then(r=>r.json()).then(templates => {
@@ -3147,12 +3164,14 @@ const server = http.createServer(async (req, res) => {
     const c_ = getCampaign(userId)
     if (c_.running) { json({ error: 'Campanha já em andamento' }, 400); return }
     const body = await readBody(req)
-    // Validate instanceName belongs to this user
-    let campaignInstance = userInstance
-    if (body.instanceName && body.instanceName !== userInstance) {
-      const userInsts = await db.getUserInstances(userId)
-      if (userInsts.some(i => i.instanceName === body.instanceName)) campaignInstance = body.instanceName
+    // Validate instanceName belongs to this user and is enabled
+    const userInsts = await db.getUserInstances(userId)
+    const requestedInstance = body.instanceName || userInstance
+    const selectedInst = userInsts.find(i => i.instanceName === requestedInstance)
+    if (!selectedInst || selectedInst.enabled === false) {
+      json({ error: 'WhatsApp selecionado está desabilitado. Habilite antes de enviar campanha.' }, 400); return
     }
+    let campaignInstance = selectedInst.instanceName
     // WA Group mode: send single message to group JID
     if (body.groupJid) {
       const media = body.useMedia ? mediaStore.get(userId) : null
@@ -3416,6 +3435,13 @@ const server = http.createServer(async (req, res) => {
     json({ ok: true }); return
   }
 
+  if (url.startsWith('/api/instances/') && url.endsWith('/enabled') && method === 'POST') {
+    const instName = decodeURIComponent(url.split('/')[3])
+    const body = await readBody(req)
+    await db.updateUserInstanceEnabled(userId, instName, body.enabled !== false)
+    json({ ok: true, enabled: body.enabled !== false }); return
+  }
+
   if (url.startsWith('/api/instances/') && method === 'DELETE' && url.split('/').length === 4) {
     const instName = decodeURIComponent(url.split('/')[3])
     const instances = await db.getUserInstances(userId)
@@ -3459,6 +3485,7 @@ const server = http.createServer(async (req, res) => {
     const instances = await db.getUserInstances(userId)
     const results = []
     for (const inst of instances) {
+      if (inst.enabled === false) { results.push({ instance: inst.instanceName, skipped: true }); continue }
       try {
         await configureWebhookForInstance(inst.instanceName)
         results.push({ instance: inst.instanceName, ok: true })

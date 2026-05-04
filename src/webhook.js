@@ -100,6 +100,7 @@ async function configureWebhook() {
     if (u.status !== 'active' && u.role !== 'admin') continue
     const instances = await db.getUserInstances(u.id).catch(() => [])
     for (const inst of instances) {
+      if (inst.enabled === false) continue
       await configureWebhookForInstance(inst.instanceName).catch(() => {})
     }
   }
@@ -132,15 +133,17 @@ async function processWebhook(data) {
   const msg = Array.isArray(data.data) ? data.data[0] : data.data
   if (!msg) { console.log('[Webhook] ignorado: payload sem data', Object.keys(data || {})); return }
 
+  const instanceName = data.instance || INSTANCE
   const jid = msg.key?.remoteJid || ''
   if (!jid) { console.log('[Webhook] ignorado: mensagem sem remoteJid |', describeMessage(msg)); return }
 
   // Dedup — Evolution API sometimes sends the same event twice (with different or same IDs)
   const msgId = msg.key?.id
-  if (msgId) {
-    if (processedMsgIds.has(msgId)) { console.log('[Webhook] dup ignorado (id):', msgId); return }
-    processedMsgIds.add(msgId)
-    setTimeout(() => processedMsgIds.delete(msgId), 120000)
+  const msgDedupeKey = msgId ? instanceName + ':' + msgId : null
+  if (msgDedupeKey) {
+    if (processedMsgIds.has(msgDedupeKey)) { console.log('[Webhook] dup ignorado (id):', msgDedupeKey); return }
+    processedMsgIds.add(msgDedupeKey)
+    setTimeout(() => processedMsgIds.delete(msgDedupeKey), 120000)
   }
 
   // captura grupo independente de fromMe (mensagem enviada por você também conta)
@@ -158,7 +161,6 @@ async function processWebhook(data) {
   // ignora fromMe só para auto-respostas (não para grupos)
   if (msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe |', describeMessage(msg)); return }
 
-  const instanceName = data.instance || INSTANCE
   const user = await db.getUserByInstance(instanceName).catch(() => null)
   if (!user) { console.log('[Webhook] instância sem usuário:', instanceName); return }
   const userId = user.id

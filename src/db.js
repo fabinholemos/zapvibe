@@ -91,6 +91,7 @@ async function init() {
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       instance_name TEXT UNIQUE NOT NULL,
       label TEXT DEFAULT 'Principal',
+      enabled BOOLEAN DEFAULT TRUE,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS scheduled_campaigns (
@@ -168,6 +169,7 @@ async function init() {
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS vencimento TEXT DEFAULT '';
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS optout BOOLEAN DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS max_instances INTEGER DEFAULT 1;
+    ALTER TABLE user_instances ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_type TEXT;
     ALTER TABLE templates ADD COLUMN IF NOT EXISTS media_data TEXT;
@@ -566,7 +568,8 @@ async function getUserByInstance(instanceName) {
   const { rows } = await pool.query(
     `SELECT u.* FROM users u
      LEFT JOIN user_instances ui ON u.id = ui.user_id AND ui.instance_name = $1
-     WHERE u.instance_name = $1 OR ui.instance_name = $1
+     WHERE (ui.instance_name = $1 AND COALESCE(ui.enabled, TRUE) = TRUE)
+        OR (u.instance_name = $1 AND (ui.enabled IS NULL OR COALESCE(ui.enabled, TRUE) = TRUE))
      LIMIT 1`,
     [instanceName]
   )
@@ -649,7 +652,7 @@ async function ping() {
 
 async function getUserInstances(userId) {
   const { rows } = await pool.query(
-    `SELECT id, instance_name as "instanceName", label, created_at as "createdAt"
+    `SELECT id, instance_name as "instanceName", label, COALESCE(enabled, TRUE) as enabled, created_at as "createdAt"
      FROM user_instances WHERE user_id=$1 ORDER BY created_at`,
     [userId]
   )
@@ -665,7 +668,7 @@ async function addUserInstance(userId, instanceName, label) {
   const { rows } = await pool.query(
     `INSERT INTO user_instances (id, user_id, instance_name, label)
      VALUES ($1,$2,$3,$4)
-     RETURNING id, instance_name as "instanceName", label, created_at as "createdAt"`,
+     RETURNING id, instance_name as "instanceName", label, COALESCE(enabled, TRUE) as enabled, created_at as "createdAt"`,
     [Date.now().toString(), userId, instanceName, label || 'WhatsApp']
   )
   return rows[0]
@@ -675,6 +678,13 @@ async function updateUserInstanceLabel(userId, instanceName, label) {
   await pool.query(
     'UPDATE user_instances SET label=$1 WHERE instance_name=$2 AND user_id=$3',
     [label, instanceName, userId]
+  )
+}
+
+async function updateUserInstanceEnabled(userId, instanceName, enabled) {
+  await pool.query(
+    'UPDATE user_instances SET enabled=$1 WHERE instance_name=$2 AND user_id=$3',
+    [enabled === false ? false : true, instanceName, userId]
   )
 }
 
@@ -888,7 +898,7 @@ async function updateFollowupStatus(id, status) {
 module.exports = {
   init, ping,
   getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout,
-  getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, deleteUserInstance,
+  getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, updateUserInstanceEnabled, deleteUserInstance,
   getDraft, saveDraft,
   getTemplates, getTemplateById, addTemplate, updateTemplate, deleteTemplate,
   getAutoreplies, addAutoreply, updateAutoreply, deleteAutoreply,
