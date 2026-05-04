@@ -3042,6 +3042,7 @@ const server = http.createServer(async (req, res) => {
   if (url.startsWith('/api/autoreplies/') && method === 'PUT') {
     const id = url.split('/')[3]
     const body = await readBody(req)
+    console.log('[PUT autoreply]', id, 'templateId:', body.templateId, 'instanceName:', body.instanceName, 'active:', body.active)
     await db.updateAutoreply(id, body, userId)
     json({ ok: true }); return
   }
