@@ -180,18 +180,24 @@ async function processWebhook(data) {
     db.trackCampaignResponse(phoneLog.id, phone, userId).catch(() => {})
   }
 
-  const rules = (await db.getAutoreplies(userId)).filter(r => {
-    if (!r.active) return false
-    if (r.instanceName && r.instanceName !== instanceName) return false
+  const allRules = await db.getAutoreplies(userId)
+  console.log('[Rule debug] total regras no DB:', allRules.length, '| instanceName webhook:', instanceName, '| senderTemplateId:', senderTemplateId)
+  const rules = allRules.filter(r => {
+    if (!r.active) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: inativa'); return false }
+    if (r.instanceName && r.instanceName !== instanceName) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: instanceName', r.instanceName, '≠', instanceName); return false }
     if (!r.templateId) {
-      // "any" trigger: only organic (prevents menu firing for campaign contacts)
-      if (r.trigger === 'any') return senderTemplateId === null
-      // keyword trigger global: fires for everyone (organic + any campaign)
+      if (r.trigger === 'any') {
+        const ok = senderTemplateId === null
+        console.log('[Rule debug]', r.name, '→', ok ? 'PASS' : 'BLOQUEADO: any só orgânico mas sender tem campanha', senderTemplateId)
+        return ok
+      }
+      console.log('[Rule debug]', r.name, '→ PASS (keyword global)')
       return true
     }
-    // campaign-specific rule: only if sender came from that exact campaign
-    if (senderTemplateId === null) return false
-    return r.templateId === senderTemplateId
+    if (senderTemplateId === null) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: templateId', r.templateId, 'mas sender sem campanha'); return false }
+    const ok = r.templateId === senderTemplateId
+    console.log('[Rule debug]', r.name, '→', ok ? 'PASS' : 'BLOQUEADO: templateId', r.templateId, '≠', senderTemplateId)
+    return ok
   })
   let matched = null
 
