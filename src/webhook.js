@@ -6,6 +6,20 @@ const replyTracker = new Map()
 const REPLY_COOLDOWN = 5 * 60 * 1000
 const processedMsgIds = new Set()
 
+function extractMessageText(msg) {
+  return msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    msg.message?.imageMessage?.caption ||
+    msg.message?.videoMessage?.caption ||
+    msg.message?.documentMessage?.caption ||
+    ''
+}
+
+function describeMessage(msg) {
+  const types = Object.keys(msg.message || {}).join(',') || 'sem message'
+  const text = extractMessageText(msg).replace(/\s+/g, ' ').trim().slice(0, 80)
+  return `id=${msg.key?.id || '-'} jid=${msg.key?.remoteJid || '-'} fromMe=${!!msg.key?.fromMe} types=${types} text="${text}"`
+}
 function isWithinSchedule(rule) {
   if (!rule.activeDays && !rule.activeStart && !rule.activeEnd) return true
   const now = new Date()
@@ -114,12 +128,12 @@ async function processWebhook(data) {
     return
   }
 
-  if (!['messages_upsert', 'messages.upsert'].includes(evt)) return
-  const msg = data.data
-  if (!msg) return
+  if (!['messages_upsert', 'messages.upsert'].includes(evt)) { console.log('[Webhook] ignorado: evento sem mensagens', evt); return }
+  const msg = Array.isArray(data.data) ? data.data[0] : data.data
+  if (!msg) { console.log('[Webhook] ignorado: payload sem data', Object.keys(data || {})); return }
 
   const jid = msg.key?.remoteJid || ''
-  if (!jid) return
+  if (!jid) { console.log('[Webhook] ignorado: mensagem sem remoteJid |', describeMessage(msg)); return }
 
   // Dedup — Evolution API sometimes sends the same event twice (with different or same IDs)
   const msgId = msg.key?.id
@@ -142,7 +156,7 @@ async function processWebhook(data) {
   }
 
   // ignora fromMe só para auto-respostas (não para grupos)
-  if (msg.key?.fromMe) return
+  if (msg.key?.fromMe) { console.log('[Webhook] ignorado: fromMe |', describeMessage(msg)); return }
 
   const instanceName = data.instance || INSTANCE
   const user = await db.getUserByInstance(instanceName).catch(() => null)
@@ -153,7 +167,7 @@ async function processWebhook(data) {
   const sendTo = await resolveJidForSending(jid, pushName, userId, instanceName)
   const phone = sendTo.replace(/@.+/, '')
 
-  const text = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').toLowerCase().trim()
+  const text = extractMessageText(msg).toLowerCase().trim()
   console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
 
   if (isRecentOutboundMessage(userId, phone, text)) {
