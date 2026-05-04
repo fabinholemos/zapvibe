@@ -331,29 +331,29 @@ textarea{resize:vertical}
   </div>
 
   <!-- Add WA Group Modal (fora das abas — funciona de qualquer aba) -->
-  <div id="add-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+  <div id="add-wa-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
     <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md mx-4">
       <h3 class="text-white font-semibold mb-1">Adicionar grupo do WhatsApp</h3>
       <p class="text-xs text-gray-500 mb-4">Cole o link de convite OU o JID do grupo</p>
       <div class="mb-3">
         <label class="text-xs text-gray-400 mb-1 block">Link de convite <span class="text-gray-600">(https://chat.whatsapp.com/...)</span></label>
-        <input id="add-group-link" type="text" placeholder="https://chat.whatsapp.com/ABC123" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+        <input id="add-wa-group-link" type="text" placeholder="https://chat.whatsapp.com/ABC123" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
       </div>
       <div class="mb-3">
         <label class="text-xs text-gray-400 mb-1 block">JID direto <span class="text-gray-600">(alternativa — ex: 120363xxx@g.us)</span></label>
-        <input id="add-group-jid" type="text" placeholder="120363xxxxxxxxxx@g.us" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+        <input id="add-wa-group-jid" type="text" placeholder="120363xxxxxxxxxx@g.us" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
       </div>
       <div class="mb-3">
         <label class="text-xs text-gray-400 mb-1 block">Nome do grupo <span class="text-gray-600">(obrigatório se usar JID direto)</span></label>
-        <input id="add-group-name" type="text" placeholder="Nome do grupo" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
+        <input id="add-wa-group-name" type="text" placeholder="Nome do grupo" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-500"/>
       </div>
       <div class="mb-4">
         <label class="text-xs text-gray-400 mb-1 block">Instância WhatsApp</label>
-        <select id="add-group-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></select>
+        <select id="add-wa-group-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></select>
       </div>
       <div class="flex gap-2">
         <button onclick="addWaGroup()" class="flex-1 px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">Adicionar</button>
-        <button onclick="document.getElementById('add-group-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-xl">Cancelar</button>
+        <button onclick="document.getElementById('add-wa-group-modal').classList.add('hidden')" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-xl">Cancelar</button>
       </div>
     </div>
   </div>
@@ -547,7 +547,7 @@ textarea{resize:vertical}
               <option value="">Nenhum grupo — clique em ＋ Adicionar</option>
             </select>
             <button onclick="syncAllWaGroups()" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-xl whitespace-nowrap" title="Buscar todos os grupos da conta">🔄 Buscar</button>
-            <button onclick="openAddGroupModal()" class="px-3 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs rounded-xl whitespace-nowrap">＋ Adicionar</button>
+            <button onclick="openAddWaGroupModal()" class="px-3 py-2 bg-violet-700 hover:bg-violet-600 text-white text-xs rounded-xl whitespace-nowrap">＋ Adicionar</button>
           </div>
         </div>
       </div>
@@ -744,6 +744,7 @@ textarea{resize:vertical}
 <div id="add-group-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
   <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-sm mx-4 fade">
     <p class="text-sm font-semibold mb-1">Adicionar contatos ao grupo</p>
+    <p class="text-xs text-gray-500 mb-2">Escolha um grupo cadastrado no ZapVibe para incluir os contatos selecionados.</p>
     <p id="add-group-count" class="text-xs text-gray-500 mb-4"></p>
     <div id="add-group-list" class="space-y-2 max-h-60 overflow-y-auto mb-4"></div>
     <button onclick="closeAddGroupModal()" class="w-full py-2 bg-gray-800 text-gray-400 text-sm rounded-xl">Fechar</button>
@@ -1902,20 +1903,21 @@ function toggleWaGroupMode() {
   }
 }
 
-function openAddGroupModal() {
-  const instSel = document.getElementById('add-group-instance')
+function openAddWaGroupModal() {
+  const instSel = document.getElementById('add-wa-group-instance')
   const campInst = document.getElementById('camp-instance')
   if (instSel && campInst) instSel.innerHTML = campInst.innerHTML
-  document.getElementById('add-group-link').value = ''
-  document.getElementById('add-group-name').value = ''
-  document.getElementById('add-group-modal').classList.remove('hidden')
+  document.getElementById('add-wa-group-link').value = ''
+  document.getElementById('add-wa-group-jid').value = ''
+  document.getElementById('add-wa-group-name').value = ''
+  document.getElementById('add-wa-group-modal').classList.remove('hidden')
 }
 
 async function addWaGroup() {
-  const link = document.getElementById('add-group-link').value.trim()
-  const jid = document.getElementById('add-group-jid').value.trim()
-  const name = document.getElementById('add-group-name').value.trim()
-  const instanceName = document.getElementById('add-group-instance').value
+  const link = document.getElementById('add-wa-group-link').value.trim()
+  const jid = document.getElementById('add-wa-group-jid').value.trim()
+  const name = document.getElementById('add-wa-group-name').value.trim()
+  const instanceName = document.getElementById('add-wa-group-instance').value
   if (!link && !jid) { alert('Informe o link de convite OU o JID do grupo.'); return }
   const btn = event?.target
   if (btn) { btn.disabled = true; btn.textContent = 'Adicionando...' }
@@ -1926,7 +1928,7 @@ async function addWaGroup() {
     }).then(r => r.json())
     if (r.error) { alert('Erro: ' + r.error); return }
     alert(\`✅ Grupo "\${r.name}" adicionado!\`)
-    document.getElementById('add-group-modal').classList.add('hidden')
+    document.getElementById('add-wa-group-modal').classList.add('hidden')
     await loadWaGroups()
   } catch (e) {
     alert('Erro: ' + e.message)
