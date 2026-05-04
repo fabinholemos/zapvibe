@@ -2,6 +2,39 @@ const db = require('./db')
 const { applyTemplate, formatPhone, sleep, sendWhatsapp, sendWhatsappMedia, personalizeWithAI } = require('./whatsapp')
 
 const campaigns = new Map()
+const recentOutboundMessages = new Map()
+const OUTBOUND_IGNORE_MS = 10 * 60 * 1000
+
+function normalizeOutboundText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[\*_~`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function outboundKey(userId, phone) {
+  return `${userId}:${String(phone || '').replace(/\D/g, '')}`
+}
+
+function rememberOutboundMessage(userId, phone, text) {
+  const key = outboundKey(userId, phone)
+  recentOutboundMessages.set(key, {
+    text: normalizeOutboundText(text),
+    at: Date.now()
+  })
+}
+
+function isRecentOutboundMessage(userId, phone, text) {
+  const key = outboundKey(userId, phone)
+  const item = recentOutboundMessages.get(key)
+  if (!item) return false
+  if (Date.now() - item.at > OUTBOUND_IGNORE_MS) {
+    recentOutboundMessages.delete(key)
+    return false
+  }
+  return item.text === normalizeOutboundText(text)
+}
 
 function getCampaign(userId) {
   if (!campaigns.has(userId)) campaigns.set(userId, { running: false, stop: false, total: 0, sent: 0, failed: 0, log: [], results: [] })
@@ -38,6 +71,7 @@ async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI,
       const msg = useAI ? await personalizeWithAI(template, c) : applyTemplate(template, c)
       if (media) await sendWhatsappMedia(c.telefone, msg, media, instanceName)
       else await sendWhatsapp(c.telefone, msg, instanceName)
+      rememberOutboundMessage(userId, formatPhone(c.telefone), msg)
       c_.sent++
       sentPhones.push(formatPhone(c.telefone))
       c_.results.push({ ...c, status: 'enviado', ts: new Date().toLocaleTimeString('pt-BR') })
@@ -59,4 +93,4 @@ async function runCampaign(contacts, template, delayMin, delayMax, limit, useAI,
   await db.updateCampaignLogCounts(logId, c_.sent, c_.failed, userId).catch(() => {})
 }
 
-module.exports = { campaigns, getCampaign, runCampaign }
+module.exports = { campaigns, getCampaign, runCampaign, rememberOutboundMessage, isRecentOutboundMessage }

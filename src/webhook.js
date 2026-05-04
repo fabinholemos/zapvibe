@@ -1,5 +1,6 @@
 const db = require('./db')
 const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappMedia, detectMediatype, INSTANCE } = require('./whatsapp')
+const { isRecentOutboundMessage } = require('./campaign')
 
 const replyTracker = new Map()
 const REPLY_COOLDOWN = 5 * 60 * 1000
@@ -154,6 +155,11 @@ async function processWebhook(data) {
 
   const text = (msg.message?.conversation || msg.message?.extendedTextMessage?.text || '').toLowerCase().trim()
   console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
+
+  if (isRecentOutboundMessage(userId, phone, text)) {
+    console.log('[Webhook] ignorado: eco de campanha enviada recentemente para', phone)
+    return
+  }
 
   // Opt-out detection — before cooldown check so it always works
   const OPTOUT_KEYWORDS = ['sair', 'parar', 'stop', 'cancelar', 'remover', 'descadastrar', 'nao quero', 'não quero']
