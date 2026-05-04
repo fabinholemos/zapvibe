@@ -1,6 +1,6 @@
 const db = require('./db')
 const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappMedia, detectMediatype, INSTANCE } = require('./whatsapp')
-const { isRecentOutboundMessage } = require('./campaign')
+const { rememberOutboundMessage, isRecentOutboundMessage } = require('./campaign')
 
 const replyTracker = new Map()
 const REPLY_COOLDOWN = 5 * 60 * 1000
@@ -157,7 +157,7 @@ async function processWebhook(data) {
   console.log('[Webhook] msg de', jid, '→ sendTo:', sendTo, '| texto:', text)
 
   if (isRecentOutboundMessage(userId, phone, text)) {
-    console.log('[Webhook] ignorado: eco de campanha enviada recentemente para', phone)
+    console.log('[Webhook] ignorado: eco de mensagem enviada recentemente para', phone)
     return
   }
 
@@ -197,7 +197,8 @@ async function processWebhook(data) {
     if (r.templateId) {
       if (senderTemplateId === null) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: templateId', r.templateId, 'mas sender sem campanha'); return false }
       const ok = r.templateId === senderTemplateId
-      console.log('[Rule debug]', r.name, '→', ok ? 'PASS (campanha associada)' : 'BLOQUEADO: templateId', r.templateId, '≠', senderTemplateId)
+      if (ok) console.log('[Rule debug]', r.name, '→ PASS (campanha associada)', r.templateId)
+      else console.log('[Rule debug]', r.name, '→ BLOQUEADO: templateId', r.templateId, '≠', senderTemplateId)
       return ok
     }
 
@@ -249,12 +250,15 @@ async function processWebhook(data) {
   if (!isWithinSchedule(matched)) {
     console.log(`[Auto-reply] fora do horário → ${sendTo} (regra: ${matched.name})`)
     if (matched.offHoursMsg) {
-      await sendWhatsapp(sendTo, applyTemplate(matched.offHoursMsg, contact), instanceName).catch(() => {})
+      const offHoursText = applyTemplate(matched.offHoursMsg, contact)
+      rememberOutboundMessage(userId, phone, offHoursText)
+      await sendWhatsapp(sendTo, offHoursText, instanceName).catch(() => {})
     }
     return
   }
 
   const replyText = applyTemplate(matched.response || '', contact)
+  rememberOutboundMessage(userId, phone, replyText)
 
   let replyResult
   if (matched.mediaBase64 && matched.mediaMimetype) {

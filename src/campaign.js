@@ -3,6 +3,7 @@ const { applyTemplate, formatPhone, sleep, sendWhatsapp, sendWhatsappMedia, pers
 
 const campaigns = new Map()
 const recentOutboundMessages = new Map()
+const recentOutboundTexts = new Map()
 const OUTBOUND_IGNORE_MS = 10 * 60 * 1000
 
 function normalizeOutboundText(text) {
@@ -17,23 +18,45 @@ function outboundKey(userId, phone) {
   return `${userId}:${String(phone || '').replace(/\D/g, '')}`
 }
 
+function outboundTextKey(userId, text) {
+  return `${userId}:${normalizeOutboundText(text)}`
+}
+
+function isExpiredOutbound(item) {
+  return !item || Date.now() - item.at > OUTBOUND_IGNORE_MS
+}
+
 function rememberOutboundMessage(userId, phone, text) {
+  const normalizedText = normalizeOutboundText(text)
+  if (!normalizedText) return
+  const now = Date.now()
   const key = outboundKey(userId, phone)
   recentOutboundMessages.set(key, {
-    text: normalizeOutboundText(text),
-    at: Date.now()
+    text: normalizedText,
+    at: now
+  })
+  recentOutboundTexts.set(outboundTextKey(userId, normalizedText), {
+    at: now
   })
 }
 
 function isRecentOutboundMessage(userId, phone, text) {
+  const normalizedText = normalizeOutboundText(text)
   const key = outboundKey(userId, phone)
   const item = recentOutboundMessages.get(key)
-  if (!item) return false
-  if (Date.now() - item.at > OUTBOUND_IGNORE_MS) {
+  if (isExpiredOutbound(item)) {
     recentOutboundMessages.delete(key)
+  } else if (item.text === normalizedText) {
+    return true
+  }
+
+  const textKey = outboundTextKey(userId, normalizedText)
+  const textItem = recentOutboundTexts.get(textKey)
+  if (isExpiredOutbound(textItem)) {
+    recentOutboundTexts.delete(textKey)
     return false
   }
-  return item.text === normalizeOutboundText(text)
+  return true
 }
 
 function getCampaign(userId) {
