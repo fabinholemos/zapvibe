@@ -1361,8 +1361,11 @@ async function startCampaign() {
     return
   }
 
-  const state = await checkStatus()
-  if (state !== 'open') { alert('WhatsApp não conectado. Conecte primeiro na aba Conexão.'); return }
+  const stateResp = selectedInstance
+    ? await fetch('/api/instances/' + encodeURIComponent(selectedInstance) + '/status').then(r=>r.json()).catch(()=>({}))
+    : { instance: { state: await checkStatus() } }
+  const state = stateResp?.instance?.state || 'close'
+  if (state !== 'open') { alert('WhatsApp selecionado não está conectado. Conecte primeiro na aba Conexão.'); return }
   if (!contacts.length) { alert('Nenhum contato. Adicione na aba Contatos.'); return }
   const remarketingContacts = window._remarketingContacts || null
   const targetContacts = remarketingContacts
@@ -1583,7 +1586,7 @@ function openAutoModal(rule) {
   fetch('/api/instances').then(r=>r.json()).then(instances => {
     const sel = document.getElementById('ar-instance')
     sel.innerHTML = '<option value="">Todos os números</option>' +
-      instances.map(i => \`<option value="\${i.instanceName}">\${esc(i.label || i.instanceName)}</option>\`).join('')
+      instances.map(i => \`<option value="\${i.instanceName}">\${esc(i.label || i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
     sel.value = rule?.instanceName || ''
   })
   // Templates
