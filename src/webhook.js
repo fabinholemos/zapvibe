@@ -184,20 +184,25 @@ async function processWebhook(data) {
   console.log('[Rule debug] total regras no DB:', allRules.length, '| instanceName webhook:', instanceName, '| senderTemplateId:', senderTemplateId)
   const rules = allRules.filter(r => {
     if (!r.active) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: inativa'); return false }
-    if (r.instanceName && r.instanceName !== instanceName) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: instanceName', r.instanceName, '≠', instanceName); return false }
-    if (!r.templateId) {
-      if (r.trigger === 'any') {
-        const ok = senderTemplateId === null
-        console.log('[Rule debug]', r.name, '→', ok ? 'PASS' : 'BLOQUEADO: any só orgânico mas sender tem campanha', senderTemplateId)
-        return ok
-      }
-      console.log('[Rule debug]', r.name, '→ PASS (keyword global)')
-      return true
+
+    // Campaign-linked rules should follow the campaign/template first. This avoids
+    // blocking replies when the same user's connected WhatsApp instance differs from
+    // the friendly label selected in the rule UI.
+    if (r.templateId) {
+      if (senderTemplateId === null) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: templateId', r.templateId, 'mas sender sem campanha'); return false }
+      const ok = r.templateId === senderTemplateId
+      console.log('[Rule debug]', r.name, '→', ok ? 'PASS (campanha associada)' : 'BLOQUEADO: templateId', r.templateId, '≠', senderTemplateId)
+      return ok
     }
-    if (senderTemplateId === null) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: templateId', r.templateId, 'mas sender sem campanha'); return false }
-    const ok = r.templateId === senderTemplateId
-    console.log('[Rule debug]', r.name, '→', ok ? 'PASS' : 'BLOQUEADO: templateId', r.templateId, '≠', senderTemplateId)
-    return ok
+
+    if (r.instanceName && r.instanceName !== instanceName) { console.log('[Rule debug]', r.name, '→ BLOQUEADO: instanceName', r.instanceName, '≠', instanceName); return false }
+    if (r.trigger === 'any') {
+      const ok = senderTemplateId === null
+      console.log('[Rule debug]', r.name, '→', ok ? 'PASS' : 'BLOQUEADO: any só orgânico mas sender tem campanha', senderTemplateId)
+      return ok
+    }
+    console.log('[Rule debug]', r.name, '→ PASS (keyword global)')
+    return true
   })
   let matched = null
 
