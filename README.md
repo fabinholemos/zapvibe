@@ -21,13 +21,14 @@ SaaS multi-tenant para disparos em massa, automação de respostas e campanhas i
 - **Contatos** — CRUD, import/export CSV, grupos, busca, opt-out automático
 - **Campanhas** — templates com `{nome}`, `{empresa}`, `{extra}`, `{vencimento}` + personalização por IA Groq
 - **Mídia** — imagem (5MB), vídeo (15MB), áudio/PDF (10MB) nos templates
-- **Auto-respostas** — webhook MESSAGES_UPSERT, keywords configuráveis, filtro por campanha, anti-loop 5min
+- **Auto-respostas** — webhook MESSAGES_UPSERT, keywords configuráveis, filtro por campanha e por instância WA, agendamento por horário/dias, off-hours msg, follow-up steps, anti-loop 5min
 - **Histórico** — log de campanhas, taxa de resposta, anti-spam por contato
 
 ### Automações
 - **Agendamento** — envio em data/hora específica
 - **Vencimento** — dispara X dias antes do campo vencimento do contato
 - **Drip campaigns** — sequências multi-etapa com delay em dias
+- **Follow-up automático** — após auto-resposta, enfileira mensagens de follow-up com delay em horas (tabela `autoreply_followup_queue`)
 
 ### SaaS / Multi-tenant
 - **Auth** — login, registro, trial 7 dias, tela de expiração
@@ -67,7 +68,7 @@ Cada usuário tem instância própria na Evolution API: `zv{userId}` (primária)
 
 ## Deploy (Railway)
 
-URL produção: `https://zapvibe-production.up.railway.app`
+URL produção: `https://www.zapvibe.com.br`
 
 ```
 railway.toml
@@ -89,7 +90,7 @@ EVOLUTION_API_URL=https://evolution-api-production-4f3a.up.railway.app
 EVOLUTION_API_KEY=sua-chave-aqui
 
 # Webhook (URL pública do zapvibe)
-WEBHOOK_BASE_URL=https://zapvibe-production.up.railway.app
+WEBHOOK_BASE_URL=https://www.zapvibe.com.br
 
 # IA
 GROQ_API_KEY=sua-chave-groq
@@ -124,6 +125,7 @@ Tabelas principais (criadas automaticamente via `db.init()`):
 | `wa_groups` | Grupos do WhatsApp capturados via webhook |
 | `user_instances` | Instâncias WA por usuário |
 | `groups_table` | Grupos de contatos |
+| `autoreply_followup_queue` | Fila de follow-ups hora-based pós auto-resposta |
 
 Migrations seguras: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` — sem downtime.
 
@@ -132,7 +134,7 @@ Migrations seguras: `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` — sem downtime.
 ```bash
 npm install
 cp .env.example .env   # configure as variáveis
-node src/dashboard.js  # http://localhost:3000
+npm run dashboard     # http://localhost:3000
 ```
 
 Requer Evolution API rodando (Docker ou Railway).
@@ -147,7 +149,7 @@ zapflow/
     whatsapp.js    — fetchApi, sendWhatsapp, sendWhatsappMedia, applyTemplate, IA
     campaign.js    — runCampaign, campaigns Map (estado por userId)
     webhook.js     — processWebhook, configureWebhook, resolveJidForSending
-    crons.js       — checkSchedules, checkVencimentos, checkDrips (setIntervals)
+    crons.js       — checkSchedules, checkVencimentos, checkDrips, checkFollowups (setIntervals)
     db.js          — pool pg, init(), todas as funções CRUD
     migrate.js     — script one-shot (migração de dados legados)
   railway.toml

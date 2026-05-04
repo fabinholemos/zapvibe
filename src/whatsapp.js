@@ -1,4 +1,7 @@
 const db = require('./db')
+const fs = require('fs')
+const path = require('path')
+const { exec } = require('child_process')
 
 const API_URL = process.env.EVOLUTION_API_URL || 'http://localhost:8080'
 const API_KEY = process.env.EVOLUTION_API_KEY || ''
@@ -101,8 +104,40 @@ async function personalizeWithAI(template, contact) {
   } catch { return applyTemplate(template, contact) }
 }
 
+async function checkStatus(instanceName = INSTANCE) {
+  try {
+    const data = await fetchApi(`/instance/connectionState/${instanceName}`, 'GET')
+    return data?.instance?.state || 'close'
+  } catch {
+    return 'close'
+  }
+}
+
+async function sendMessage(phone, message, instanceName = INSTANCE) {
+  return sendWhatsapp(phone, message, instanceName)
+}
+
+async function connectInstance(instanceName = INSTANCE) {
+  await fetchApi('/instance/create', 'POST', {
+    instanceName,
+    qrcode: true,
+    integration: 'WHATSAPP-BAILEYS'
+  }).catch(() => {})
+
+  const result = await fetchApi(`/instance/connect/${instanceName}`, 'GET')
+  const qr = result?.qrcode?.base64 || result?.base64
+  if (qr) {
+    const qrPath = path.resolve('qrcode.html')
+    fs.writeFileSync(qrPath, `<html><body style="background:#000;display:flex;justify-content:center;align-items:center;height:100vh;margin:0"><img src="${qr}" style="max-width:400px"/></body></html>`, 'utf8')
+    console.log(`QR Code salvo em: ${qrPath}`)
+    if (process.platform === 'win32') exec(`start "" "${qrPath}"`)
+  } else {
+    console.log('Instancia ja conectada ou QR Code indisponivel.')
+  }
+  return result
+}
 module.exports = {
   applyTemplate, formatPhone, sleep, fetchApi,
-  sendWhatsapp, sendWhatsappMedia, notifyAdminNewUser, detectMediatype, personalizeWithAI,
+  sendWhatsapp, sendWhatsappMedia, sendMessage, checkStatus, connectInstance, notifyAdminNewUser, detectMediatype, personalizeWithAI,
   API_URL, API_KEY, INSTANCE
 }

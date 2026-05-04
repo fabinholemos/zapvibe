@@ -2,12 +2,13 @@
   "name": "zapvibe",
   "version": "1.0.0",
   "description": "Disparador inteligente de WhatsApp com IA",
-  "main": "src/index.js",
+  "main": "src/dashboard.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/dashboard.js",
+    "dashboard": "node src/dashboard.js",
+    "cli": "node src/index.js",
     "connect": "node src/index.js --connect",
-    "status": "node src/index.js --status",
-    "dashboard": "node src/dashboard.js"
+    "status": "node src/index.js --status"
   },
   "dependencies": {
     "axios": "^1.6.0",
