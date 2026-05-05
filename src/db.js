@@ -135,6 +135,7 @@ async function init() {
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       phone TEXT NOT NULL,
       nome TEXT DEFAULT '',
+      instance_name TEXT,
       step_index INTEGER DEFAULT 0,
       send_at TIMESTAMPTZ NOT NULL,
       status TEXT DEFAULT 'pending',
@@ -200,6 +201,7 @@ async function init() {
     ALTER TABLE groups_table ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE lid_map ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE draft ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+    ALTER TABLE drip_queue ADD COLUMN IF NOT EXISTS instance_name TEXT;
   `).catch(() => {})
 
   // Atribui dados órfãos (user_id NULL) ao primeiro admin
@@ -843,8 +845,8 @@ async function deleteDrip(id, userId) {
 
 async function getDripQueue(userId, dripId) {
   const query = dripId
-    ? `SELECT id, drip_id as "dripId", phone, nome, step_index as "stepIndex", send_at as "sendAt", status FROM drip_queue WHERE user_id=$1 AND drip_id=$2 ORDER BY send_at`
-    : `SELECT id, drip_id as "dripId", phone, nome, step_index as "stepIndex", send_at as "sendAt", status FROM drip_queue WHERE user_id=$1 ORDER BY send_at`
+    ? `SELECT id, drip_id as "dripId", phone, nome, instance_name as "instanceName", step_index as "stepIndex", send_at as "sendAt", status FROM drip_queue WHERE user_id=$1 AND drip_id=$2 ORDER BY send_at`
+    : `SELECT id, drip_id as "dripId", phone, nome, instance_name as "instanceName", step_index as "stepIndex", send_at as "sendAt", status FROM drip_queue WHERE user_id=$1 ORDER BY send_at`
   const { rows } = await pool.query(query, dripId ? [userId, dripId] : [userId])
   return rows
 }
@@ -860,9 +862,9 @@ async function getPendingDripItems(userId) {
 async function addDripQueueItems(items) {
   for (const item of items) {
     await pool.query(
-      `INSERT INTO drip_queue (id, drip_id, user_id, phone, nome, step_index, send_at, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') ON CONFLICT (id) DO NOTHING`,
-      [item.id, item.dripId, item.userId, item.phone, item.nome, item.stepIndex, item.sendAt]
+      `INSERT INTO drip_queue (id, drip_id, user_id, phone, nome, instance_name, step_index, send_at, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending') ON CONFLICT (id) DO NOTHING`,
+      [item.id, item.dripId, item.userId, item.phone, item.nome, item.instanceName || null, item.stepIndex, item.sendAt]
     )
   }
 }

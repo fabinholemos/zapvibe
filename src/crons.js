@@ -81,7 +81,7 @@ async function checkDrips() {
         if (!step) { await db.updateDripItemStatus(item.id, 'done').catch(() => {}); continue }
         await db.updateDripItemStatus(item.id, 'running')
         const contact = { nome: item.nome, telefone: item.phone }
-        const instanceName = user.instance_name || INSTANCE
+        const instanceName = item.instance_name || user.instance_name || INSTANCE
         try {
           await sendWhatsapp(item.phone, applyTemplate(step.message, contact), instanceName)
           await db.updateDripItemStatus(item.id, 'sent')
@@ -99,7 +99,7 @@ async function checkDrips() {
           if (nextIdx < drip.steps.length) {
             const nextStep = drip.steps[nextIdx]
             const sendAt = new Date(Date.now() + (nextStep.delayDays || 1) * 86400000).toISOString()
-            await db.addDripQueueItems([{ id: `${Date.now()}_${item.phone}_${nextIdx}`, dripId: item.drip_id, userId: user.id, phone: item.phone, nome: item.nome, stepIndex: nextIdx, sendAt }])
+            await db.addDripQueueItems([{ id: `${Date.now()}_${item.phone}_${nextIdx}`, dripId: item.drip_id, userId: user.id, phone: item.phone, nome: item.nome, instanceName, stepIndex: nextIdx, sendAt }])
           }
         } catch (e) {
           await db.updateDripItemStatus(item.id, 'failed').catch(() => {})

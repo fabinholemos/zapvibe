@@ -255,12 +255,16 @@ textarea{resize:vertical}
         <div class="bg-gray-900 border border-gray-700 rounded-2xl p-5 w-full max-w-sm space-y-4">
           <p class="text-sm font-semibold">▶ Iniciar sequência</p>
           <div>
+            <label class="block text-xs text-gray-400 mb-1.5">WhatsApp que vai enviar</label>
+            <select id="drip-start-instance" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"></select>
+          </div>
+          <div>
             <label class="block text-xs text-gray-400 mb-1.5">Enviar para</label>
             <select id="drip-start-group" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
               <option value="">Todos os contatos</option>
             </select>
           </div>
-          <p class="text-xs text-gray-500">A 1ª mensagem será enviada agora. As demais serão enviadas automaticamente nos dias configurados.</p>
+          <p class="text-xs text-gray-500">A 1ª mensagem entra na fila imediatamente e sai em até 1 minuto. As demais serão enviadas automaticamente nos dias configurados.</p>
           <div class="flex gap-2">
             <button onclick="confirmStartDrip()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Iniciar</button>
             <button onclick="closeDripStartModal()" class="flex-1 py-2 bg-gray-700 text-gray-300 text-sm rounded-xl">Cancelar</button>
@@ -2296,7 +2300,15 @@ async function loadDrips() {
 let _dripStartId = null
 async function startDrip(id) {
   _dripStartId = id
-  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  const [groups, instances] = await Promise.all([
+    fetch('/api/groups').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/instances').then(r=>r.json()).catch(()=>[])
+  ])
+  const instSel = document.getElementById('drip-start-instance')
+  const enabledInstances = instances.filter(i => i.enabled !== false)
+  instSel.innerHTML = enabledInstances.length
+    ? enabledInstances.map(i => \`<option value="\${esc(i.instanceName)}">\${esc(i.label || i.instanceName)} (\${esc(i.instanceName)})</option>\`).join('')
+    : '<option value="">Nenhum WhatsApp habilitado</option>'
   const sel = document.getElementById('drip-start-group')
   sel.innerHTML = '<option value="">Todos os contatos</option>' + groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`).join('')
   document.getElementById('drip-start-modal').classList.remove('hidden')
@@ -2304,7 +2316,9 @@ async function startDrip(id) {
 function closeDripStartModal() { document.getElementById('drip-start-modal').classList.add('hidden'); _dripStartId = null }
 async function confirmStartDrip() {
   const groupId = document.getElementById('drip-start-group').value
-  const body = groupId ? { groupId } : {}
+  const instanceName = document.getElementById('drip-start-instance').value
+  if (!instanceName) { alert('Habilite um WhatsApp antes de iniciar a sequência.'); return }
+  const body = { instanceName, ...(groupId ? { groupId } : {}) }
   const btn = document.querySelector('#drip-start-modal button')
   btn.disabled = true; btn.textContent = 'Iniciando...'
   const r = await fetch(\`/api/drips/\${_dripStartId}/start\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).then(r=>r.json()).catch(()=>({}))
@@ -3386,19 +3400,26 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req)
     const drip = await db.getDrip(dripId, userId)
     if (!drip || !drip.steps?.length) { json({ error: 'Drip sem etapas' }, 400); return }
+    const userInsts = await db.getUserInstances(userId)
+    const requestedInstance = body.instanceName || userInstance
+    const selectedInst = userInsts.find(i => i.instanceName === requestedInstance)
+    if (!selectedInst || selectedInst.enabled === false) {
+      json({ error: 'WhatsApp selecionado está desabilitado. Habilite antes de iniciar a sequência.' }, 400); return
+    }
+    const dripInstance = selectedInst.instanceName
     let contacts = (await db.getContacts(userId)).filter(c => !c.optout)
     if (body.groupId) {
       const groups = await db.getGroups(userId)
       const grp = groups.find(g => g.id === body.groupId)
       if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))
     }
-    const firstStep = drip.steps[0]
     const now = Date.now()
     const items = contacts.map((c, i) => ({
       id: `${now}_${c.telefone.replace(/\D/g, '')}_0`,
       dripId, userId,
       phone: c.telefone,
       nome: c.nome,
+      instanceName: dripInstance,
       stepIndex: 0,
       sendAt: new Date(now + i * 2000).toISOString()
     }))
