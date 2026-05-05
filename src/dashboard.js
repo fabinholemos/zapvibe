@@ -2835,7 +2835,9 @@ loadUsers()
 // ── Server ────────────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
-  const url = req.url
+  const fullUrl = req.url || '/'
+  const parsedUrl = new URL(fullUrl, 'http://localhost')
+  const url = parsedUrl.pathname
   const method = req.method
 
   const json = (data, code = 200) => {
@@ -2925,7 +2927,7 @@ const server = http.createServer(async (req, res) => {
   const session = await getAuthSession(req)
   if (!session) {
     if (url.startsWith('/api/')) { json({ error: 'Não autorizado' }, 401); return }
-    const next = encodeURIComponent(url)
+    const next = encodeURIComponent(fullUrl)
     res.writeHead(302, { 'Location': `/login?next=${next}` }); res.end(); return
   }
 
