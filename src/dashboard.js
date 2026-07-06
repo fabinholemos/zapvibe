@@ -591,6 +591,9 @@ textarea{resize:vertical}
           </div>
           <button onclick="scheduleCampaign()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-xl whitespace-nowrap">📅 Agendar</button>
         </div>
+        <p id="sched-selection-hint" class="text-xs text-gray-500 mt-2 hidden">
+          Quer escolher pessoa por pessoa dentro do grupo? <button onclick="tab('contacts')" class="text-violet-400 hover:text-violet-300 underline">Abra a aba Contatos</button>, marque os que quiser e volte aqui — a seleção é aproveitada no agendamento.
+        </p>
       </div>
 
       <!-- Progress -->
@@ -2090,7 +2093,9 @@ async function reincludeContact(telefone) {
 
 // ── Scheduled campaigns (campaign tab) ───────────────────────────────────────
 function toggleSchedForm() {
-  document.getElementById('sched-form').classList.toggle('hidden', !document.getElementById('sched-toggle').checked)
+  const on = document.getElementById('sched-toggle').checked
+  document.getElementById('sched-form').classList.toggle('hidden', !on)
+  document.getElementById('sched-selection-hint').classList.toggle('hidden', !on)
 }
 
 async function scheduleCampaign() {
@@ -2100,16 +2105,21 @@ async function scheduleCampaign() {
   const tpl = document.getElementById('tpl').value.trim()
   if (!tpl) { alert('Mensagem vazia.'); return }
   const groupId = document.getElementById('camp-group').value || ''
+  const remarketingContacts = window._remarketingContacts || null
+  const contactPhones = remarketingContacts
+    ? remarketingContacts.map(c => c.telefone.replace(/\D/g,''))
+    : (selected.size > 0 ? contacts.filter((_,i) => selected.has(i)).map(c => c.telefone.replace(/\D/g,'')) : [])
   const delayMin = parseInt(document.getElementById('cfg-dmin').value) || 8000
   const delayMax = parseInt(document.getElementById('cfg-dmax').value) || 20000
   const dailyLimit = parseInt(document.getElementById('cfg-limit').value) || 150
   const useAi = document.getElementById('cfg-ai').checked
   const tplId = window._activeTplId || null
   const tplName = window._activeTplName || 'Sem nome'
-  await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ template: tpl, templateId: tplId, templateName: tplName, groupId, scheduledAt, delayMin, delayMax, dailyLimit, useAi }) })
+  await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ template: tpl, templateId: tplId, templateName: tplName, groupId, contactPhones, scheduledAt, delayMin, delayMax, dailyLimit, useAi }) })
   document.getElementById('sched-toggle').checked = false
   document.getElementById('sched-form').classList.add('hidden')
-  alert('Campanha agendada!')
+  const qtd = contactPhones.length ? \`\${contactPhones.length} contato(s) selecionado(s)\` : 'todos os contatos do filtro'
+  alert(\`Campanha agendada para \${qtd}!\`)
   loadScheduledList()
 }
 
@@ -2125,7 +2135,7 @@ async function loadScheduledList() {
     return \`<div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2">
       <div class="flex-1 min-w-0 mr-3">
         <p class="text-xs font-medium truncate">\${esc(s.templateName||'Campanha')}</p>
-        <p class="text-xs text-gray-500">🕐 \${label} \${s.groupId?'· Grupo selecionado':''}</p>
+        <p class="text-xs text-gray-500">🕐 \${label} \${s.contactPhones?.length ? \`· \${s.contactPhones.length} contato(s) selecionado(s)\` : (s.groupId?'· Grupo selecionado':'')}</p>
       </div>
       <div class="flex items-center gap-2">
         <span class="text-xs \${statusColor}">\${s.status}</span>
@@ -3365,7 +3375,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/schedules' && method === 'POST') {
     const body = await readBody(req)
     if (!body.template?.trim() || !body.scheduledAt) { json({ error: 'template e scheduledAt obrigatórios' }, 400); return }
-    const s = { id: Date.now().toString(), template: body.template.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', scheduledAt: body.scheduledAt, delayMin: body.delayMin || 8000, delayMax: body.delayMax || 20000, dailyLimit: body.dailyLimit || 150, useAi: body.useAi || false }
+    const s = { id: Date.now().toString(), template: body.template.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', contactPhones: Array.isArray(body.contactPhones) ? body.contactPhones : [], scheduledAt: body.scheduledAt, delayMin: body.delayMin || 8000, delayMax: body.delayMax || 20000, dailyLimit: body.dailyLimit || 150, useAi: body.useAi || false }
     json(await db.addSchedule(s, userId)); return
   }
   if (url.startsWith('/api/schedules/') && method === 'DELETE') {

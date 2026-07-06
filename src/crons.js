@@ -25,7 +25,10 @@ async function checkSchedules() {
       for (const s of schedules) {
         await db.updateScheduleStatus(s.id, 'running')
         let contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => !c.optout)
-        if (s.group_id) {
+        if (s.contact_phones && s.contact_phones.length) {
+          const phoneSet = new Set(s.contact_phones)
+          contacts = contacts.filter(c => phoneSet.has(c.telefone.replace(/\D/g, '')))
+        } else if (s.group_id) {
           const groups = await db.getGroups(user.id).catch(() => [])
           const grp = groups.find(g => g.id === s.group_id)
           if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))

@@ -101,6 +101,7 @@ async function init() {
       template_id TEXT,
       template_name TEXT DEFAULT '',
       group_id TEXT DEFAULT '',
+      contact_phones JSONB DEFAULT '[]',
       scheduled_at TIMESTAMPTZ NOT NULL,
       delay_min INTEGER DEFAULT 8000,
       delay_max INTEGER DEFAULT 20000,
@@ -204,6 +205,7 @@ async function init() {
     ALTER TABLE draft ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE drip_queue ADD COLUMN IF NOT EXISTS instance_name TEXT;
     ALTER TABLE vencimento_rules ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '';
+    ALTER TABLE scheduled_campaigns ADD COLUMN IF NOT EXISTS contact_phones JSONB DEFAULT '[]';
   `).catch(() => {})
 
   // Atribui dados órfãos (user_id NULL) ao primeiro admin
@@ -701,7 +703,7 @@ async function deleteUserInstance(userId, instanceName) {
 async function getSchedules(userId) {
   const { rows } = await pool.query(
     `SELECT id, template, template_id as "templateId", template_name as "templateName",
-            group_id as "groupId", scheduled_at as "scheduledAt",
+            group_id as "groupId", contact_phones as "contactPhones", scheduled_at as "scheduledAt",
             delay_min as "delayMin", delay_max as "delayMax", daily_limit as "dailyLimit",
             use_ai as "useAi", status, created_at as "createdAt"
      FROM scheduled_campaigns WHERE user_id=$1 ORDER BY scheduled_at`,
@@ -720,14 +722,14 @@ async function getPendingSchedules(userId) {
 
 async function addSchedule(s, userId) {
   const { rows } = await pool.query(
-    `INSERT INTO scheduled_campaigns (id, user_id, template, template_id, template_name, group_id, scheduled_at, delay_min, delay_max, daily_limit, use_ai)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `INSERT INTO scheduled_campaigns (id, user_id, template, template_id, template_name, group_id, contact_phones, scheduled_at, delay_min, delay_max, daily_limit, use_ai)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING id, template, template_id as "templateId", template_name as "templateName",
-               group_id as "groupId", scheduled_at as "scheduledAt",
+               group_id as "groupId", contact_phones as "contactPhones", scheduled_at as "scheduledAt",
                delay_min as "delayMin", delay_max as "delayMax", daily_limit as "dailyLimit",
                use_ai as "useAi", status, created_at as "createdAt"`,
     [s.id, userId, s.template, s.templateId || null, s.templateName || '', s.groupId || '',
-     s.scheduledAt, s.delayMin || 8000, s.delayMax || 20000, s.dailyLimit || 150, s.useAi || false]
+     JSON.stringify(s.contactPhones || []), s.scheduledAt, s.delayMin || 8000, s.delayMax || 20000, s.dailyLimit || 150, s.useAi || false]
   )
   return rows[0]
 }
