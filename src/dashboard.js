@@ -224,6 +224,12 @@ textarea{resize:vertical}
             <label class="text-xs text-gray-500 block mb-1">Dias antes do vencimento</label>
             <input id="vf-days" type="number" value="3" min="0" max="365" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
           </div>
+          <div class="flex-1">
+            <label class="text-xs text-gray-500 block mb-1">Grupo de contatos</label>
+            <select id="vf-group" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+              <option value="">Todos os contatos</option>
+            </select>
+          </div>
         </div>
         <div>
           <label class="text-xs text-gray-500 block mb-1">Mensagem (use {nome}, {vencimento}, {empresa})</label>
@@ -2135,15 +2141,21 @@ async function deleteSchedule(id) {
 }
 
 // ── Vencimento rules ──────────────────────────────────────────────────────────
-function openVencForm() { document.getElementById('venc-form').classList.remove('hidden') }
-function closeVencForm() { document.getElementById('venc-form').classList.add('hidden'); document.getElementById('vf-name').value=''; document.getElementById('vf-days').value='3'; document.getElementById('vf-content').value='' }
+async function openVencForm() {
+  document.getElementById('venc-form').classList.remove('hidden')
+  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  const sel = document.getElementById('vf-group')
+  sel.innerHTML = '<option value="">Todos os contatos</option>' + groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`).join('')
+}
+function closeVencForm() { document.getElementById('venc-form').classList.add('hidden'); document.getElementById('vf-name').value=''; document.getElementById('vf-days').value='3'; document.getElementById('vf-content').value=''; document.getElementById('vf-group').value='' }
 
 async function saveVencRule() {
   const name = document.getElementById('vf-name').value.trim()
   const daysBefore = parseInt(document.getElementById('vf-days').value) || 3
+  const groupId = document.getElementById('vf-group').value
   const templateContent = document.getElementById('vf-content').value.trim()
   if (!name || !templateContent) { alert('Preencha nome e mensagem.'); return }
-  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, templateContent }) })
+  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, groupId, templateContent }) })
   closeVencForm()
   loadVencimentoRules()
 }
@@ -2152,11 +2164,15 @@ async function loadVencimentoRules() {
   const rules = await fetch('/api/vencimento-rules').then(r=>r.json()).catch(()=>[])
   const el = document.getElementById('venc-list')
   if (!rules.length) { el.innerHTML='<p class="text-xs text-gray-600 text-center py-4">Nenhuma regra criada.</p>'; return }
-  el.innerHTML = rules.map(r => \`
+  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  el.innerHTML = rules.map(r => {
+    const grp = r.groupId ? groups.find(g => g.id === r.groupId) : null
+    const groupTag = grp ? \`📁 \${esc(grp.name)}\` : (r.groupId ? '⚠️ grupo excluído' : 'Todos os contatos')
+    return \`
     <div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2.5">
       <div class="flex-1 min-w-0 mr-3">
         <p class="text-xs font-medium">\${esc(r.name)}</p>
-        <p class="text-xs text-gray-500">\${r.daysBefore} dia\${r.daysBefore!==1?'s':''} antes do vencimento</p>
+        <p class="text-xs text-gray-500">\${r.daysBefore} dia\${r.daysBefore!==1?'s':''} antes do vencimento · \${groupTag}</p>
       </div>
       <div class="flex items-center gap-2">
         <label class="flex items-center gap-1 cursor-pointer">
@@ -2166,7 +2182,8 @@ async function loadVencimentoRules() {
         <button onclick="deleteVencRule('\${r.id}')" class="text-gray-600 hover:text-red-400 text-xs ml-1">✕</button>
       </div>
     </div>
-  \`).join('')
+  \`
+  }).join('')
 }
 
 async function toggleVencRule(id, active) {
@@ -3363,7 +3380,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/vencimento-rules' && method === 'POST') {
     const body = await readBody(req)
     if (!body.name?.trim() || !body.templateContent?.trim()) { json({ error: 'name e templateContent obrigatórios' }, 400); return }
-    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', active: true }, userId)); return
+    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', active: true }, userId)); return
   }
   if (url.startsWith('/api/vencimento-rules/') && method === 'PUT') {
     const body = await readBody(req)

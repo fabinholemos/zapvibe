@@ -117,6 +117,7 @@ async function init() {
       template_content TEXT NOT NULL DEFAULT '',
       template_id TEXT,
       template_name TEXT DEFAULT '',
+      group_id TEXT DEFAULT '',
       active BOOLEAN DEFAULT TRUE,
       last_run_date TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
@@ -202,6 +203,7 @@ async function init() {
     ALTER TABLE lid_map ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE draft ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE drip_queue ADD COLUMN IF NOT EXISTS instance_name TEXT;
+    ALTER TABLE vencimento_rules ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '';
   `).catch(() => {})
 
   // Atribui dados órfãos (user_id NULL) ao primeiro admin
@@ -743,7 +745,7 @@ async function deleteSchedule(id, userId) {
 async function getVencimentoRules(userId) {
   const { rows } = await pool.query(
     `SELECT id, name, days_before as "daysBefore", template_content as "templateContent",
-            template_id as "templateId", template_name as "templateName",
+            template_id as "templateId", template_name as "templateName", group_id as "groupId",
             active, last_run_date as "lastRunDate", created_at as "createdAt"
      FROM vencimento_rules WHERE user_id=$1 ORDER BY created_at`,
     [userId]
@@ -753,11 +755,12 @@ async function getVencimentoRules(userId) {
 
 async function addVencimentoRule(r, userId) {
   const { rows } = await pool.query(
-    `INSERT INTO vencimento_rules (id, user_id, name, days_before, template_content, template_id, template_name, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+    `INSERT INTO vencimento_rules (id, user_id, name, days_before, template_content, template_id, template_name, group_id, active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
      RETURNING id, name, days_before as "daysBefore", template_content as "templateContent",
-               template_id as "templateId", template_name as "templateName", active, last_run_date as "lastRunDate"`,
-    [r.id, userId, r.name, r.daysBefore, r.templateContent, r.templateId || null, r.templateName || '', r.active !== false]
+               template_id as "templateId", template_name as "templateName", group_id as "groupId",
+               active, last_run_date as "lastRunDate"`,
+    [r.id, userId, r.name, r.daysBefore, r.templateContent, r.templateId || null, r.templateName || '', r.groupId || '', r.active !== false]
   )
   return rows[0]
 }
@@ -766,14 +769,15 @@ async function updateVencimentoRule(id, updates, userId) {
   const { rows } = await pool.query('SELECT * FROM vencimento_rules WHERE id=$1 AND user_id=$2', [id, userId])
   const cur = rows[0]; if (!cur) return
   await pool.query(
-    `UPDATE vencimento_rules SET name=$1, days_before=$2, template_content=$3, template_id=$4, template_name=$5, active=$6
-     WHERE id=$7 AND user_id=$8`,
+    `UPDATE vencimento_rules SET name=$1, days_before=$2, template_content=$3, template_id=$4, template_name=$5, group_id=$6, active=$7
+     WHERE id=$8 AND user_id=$9`,
     [
       updates.name !== undefined ? updates.name : cur.name,
       updates.daysBefore !== undefined ? updates.daysBefore : cur.days_before,
       updates.templateContent !== undefined ? updates.templateContent : cur.template_content,
       updates.templateId !== undefined ? updates.templateId : cur.template_id,
       updates.templateName !== undefined ? updates.templateName : cur.template_name,
+      updates.groupId !== undefined ? updates.groupId : cur.group_id,
       updates.active !== undefined ? updates.active : cur.active,
       id, userId
     ]

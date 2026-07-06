@@ -51,12 +51,17 @@ async function checkVencimentos() {
         if (!rule.active || rule.lastRunDate === todayStr) continue
         const targetDate = new Date(today)
         targetDate.setDate(targetDate.getDate() + parseInt(rule.daysBefore))
-        const contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => {
+        let contacts = (await db.getContacts(user.id).catch(() => [])).filter(c => {
           if (!c.vencimento || c.optout) return false
           const d = parseVencimentoDate(c.vencimento)
           if (!d) return false
           return d.getDate() === targetDate.getDate() && d.getMonth() === targetDate.getMonth()
         })
+        if (rule.groupId) {
+          const groups = await db.getGroups(user.id).catch(() => [])
+          const grp = groups.find(g => g.id === rule.groupId)
+          contacts = grp ? contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, ''))) : []
+        }
         if (contacts.length) {
           const instanceName = user.instance_name || INSTANCE
           runCampaign(contacts, rule.templateContent, 8000, 20000, 500, false, null, rule.templateId, rule.name, user.id, instanceName)
