@@ -441,6 +441,7 @@ textarea{resize:vertical}
         <input id="f-tel" placeholder="Telefone * (ex: 11999990001)" autocomplete="off" inputmode="numeric" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
         <input id="f-emp" placeholder="Empresa (opcional)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
         <input id="f-ext" placeholder="Info extra (opcional)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+        <input id="f-venc" placeholder="Vencimento (ex: 20/07/2026)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
       </div>
       <!-- Grupo -->
       <div class="mb-3">
@@ -474,6 +475,7 @@ textarea{resize:vertical}
             <th class="text-left px-4 py-2">Telefone</th>
             <th class="text-left px-4 py-2">Empresa</th>
             <th class="text-left px-4 py-2">Extra</th>
+            <th class="text-left px-4 py-2">Vencimento</th>
             <th class="px-4 py-2"></th>
           </tr></thead>
           <tbody id="contacts-tbody"></tbody>
@@ -807,6 +809,7 @@ textarea{resize:vertical}
       <input id="ec-tel" placeholder="Telefone *" autocomplete="off" inputmode="numeric" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
       <input id="ec-emp" placeholder="Empresa (opcional)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
       <input id="ec-ext" placeholder="Info extra (opcional)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+      <input id="ec-venc" placeholder="Vencimento (ex: 20/07/2026)" autocomplete="off" class="bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
     </div>
     <div class="flex gap-2">
       <button onclick="saveEditContact()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
@@ -1066,6 +1069,7 @@ function renderContacts() {
       <td class="px-4 py-2.5 font-mono text-gray-400 text-xs">\${esc(c.telefone)}</td>
       <td class="px-4 py-2.5 text-gray-400">\${esc(c.empresa||'—')}</td>
       <td class="px-4 py-2.5 text-gray-500 text-xs">\${esc(c.extra||'—')}</td>
+      <td class="px-4 py-2.5 text-gray-400 text-xs">\${esc(c.vencimento||'—')}</td>
       <td class="px-4 py-2.5 text-right flex items-center justify-end gap-2">
         \${optoutBtn}
         <button onclick="openEditContact(\${realIdx})" class="text-gray-600 hover:text-violet-400 transition-colors text-xs">✎</button>
@@ -1106,7 +1110,8 @@ async function addContact() {
     nome: document.getElementById('f-nome').value.trim(),
     telefone: document.getElementById('f-tel').value.trim(),
     empresa: document.getElementById('f-emp').value.trim(),
-    extra: document.getElementById('f-ext').value.trim()
+    extra: document.getElementById('f-ext').value.trim(),
+    vencimento: document.getElementById('f-venc').value.trim()
   }
   if (!c.nome || !c.telefone) { alert('Nome e telefone obrigatórios'); return }
   contacts.push(c)
@@ -1129,6 +1134,7 @@ async function addContact() {
   document.getElementById('f-tel').value=''
   document.getElementById('f-emp').value=''
   document.getElementById('f-ext').value=''
+  document.getElementById('f-venc').value=''
   document.getElementById('f-group').value=''
   toggleAddForm()
   filtered = [...contacts]
@@ -1173,6 +1179,7 @@ function openEditContact(idx) {
   document.getElementById('ec-tel').value = c.telefone || ''
   document.getElementById('ec-emp').value = c.empresa || ''
   document.getElementById('ec-ext').value = c.extra || ''
+  document.getElementById('ec-venc').value = c.vencimento || ''
   document.getElementById('edit-contact-modal').classList.remove('hidden')
   setTimeout(() => document.getElementById('ec-nome').focus(), 50)
 }
@@ -1191,7 +1198,8 @@ async function saveEditContact() {
     nome,
     telefone,
     empresa: document.getElementById('ec-emp').value.trim(),
-    extra: document.getElementById('ec-ext').value.trim()
+    extra: document.getElementById('ec-ext').value.trim(),
+    vencimento: document.getElementById('ec-venc').value.trim()
   }
   await fetch('/api/contacts', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(contacts) })
   filtered = [...contacts]
