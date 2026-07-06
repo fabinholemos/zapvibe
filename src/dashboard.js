@@ -383,10 +383,43 @@ textarea{resize:vertical}
           Importar CSV <input type="file" accept=".csv" onchange="importCSV(event)" class="hidden"/>
         </label>
         <button onclick="exportCSV()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-xl transition-colors">Exportar</button>
+        <button onclick="openWebhookInfoModal()" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm font-medium rounded-xl transition-colors">🔗 Importar automático (planilha)</button>
       </div>
       <div class="flex gap-2">
         <button id="btn-delete-selected" onclick="deleteSelected()" class="hidden px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded-xl transition-colors">🗑 Excluir selecionados</button>
         <button onclick="toggleAddForm()" class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl transition-colors">+ Adicionar</button>
+      </div>
+    </div>
+
+    <!-- Webhook auto-import modal -->
+    <div id="webhook-info-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-lg space-y-4 max-h-[85vh] overflow-y-auto">
+        <div class="flex items-center justify-between">
+          <h3 class="text-white font-semibold">🔗 Importar automaticamente da planilha</h3>
+          <button onclick="closeWebhookInfoModal()" class="text-gray-500 hover:text-gray-300">✕</button>
+        </div>
+        <p class="text-xs text-gray-400">Cole o script abaixo no Google Sheets (Extensões → Apps Script). A cada linha nova preenchida na planilha, o contato entra automaticamente no ZapVibe — sem precisar exportar/importar CSV de novo.</p>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">1. Sua URL de destino</label>
+          <div class="flex gap-2">
+            <input id="wh-url" readonly class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-300"/>
+            <button onclick="copyWebhookField('wh-url')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-xl">Copiar</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">2. Seu token (mantenha em segredo)</label>
+          <div class="flex gap-2">
+            <input id="wh-token" readonly class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-300"/>
+            <button onclick="copyWebhookField('wh-token')" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-xl">Copiar</button>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">3. Script para colar no Apps Script da planilha</label>
+          <p class="text-xs text-gray-500 mb-1.5">Sua planilha precisa ter as colunas, na primeira linha: <span class="font-mono text-gray-300">nome, telefone, empresa, extra, vencimento</span></p>
+          <textarea id="wh-script" readonly rows="16" class="w-full bg-gray-950 border border-gray-700 rounded-xl px-3 py-2 text-[11px] font-mono text-gray-300 resize-none"></textarea>
+          <button onclick="copyWebhookField('wh-script')" class="mt-2 w-full py-2 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-xl">Copiar script</button>
+        </div>
+        <p class="text-xs text-gray-500">Depois de colar: no editor do Apps Script, clique no relógio (⏰ Gatilhos) → + Adicionar gatilho → escolha a função <span class="font-mono">aoEditarLinha</span> → evento "Ao editar" → Salvar. Pronto, a partir daí toda linha nova preenchida entra sozinha no ZapVibe.</p>
       </div>
     </div>
 
@@ -1195,6 +1228,67 @@ function exportCSV() {
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv)
   a.download = 'contatos.csv'
   a.click()
+}
+
+// ── Importação automática via planilha (Google Sheets → ZapVibe) ──────────────
+function buildAppsScript(url, token) {
+  return [
+    "function aoEditarLinha(e) {",
+    "  var ZAPVIBE_URL = '" + url + "';",
+    "  var TOKEN = '" + token + "';",
+    "",
+    "  var range = e.range;",
+    "  var sheet = range.getSheet();",
+    "  var row = range.getRow();",
+    "  if (row === 1) return; // ignora a linha de cabeçalho",
+    "",
+    "  var lastCol = sheet.getLastColumn();",
+    "  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];",
+    "  var values = sheet.getRange(row, 1, 1, lastCol).getValues()[0];",
+    "",
+    "  var data = {};",
+    "  for (var i = 0; i < headers.length; i++) {",
+    "    var key = headers[i].toString().trim().toLowerCase();",
+    "    data[key] = values[i];",
+    "  }",
+    "  if (!data.telefone) return; // linha sem telefone, ignora",
+    "",
+    "  var payload = {",
+    "    token: TOKEN,",
+    "    nome: (data.nome || '').toString(),",
+    "    telefone: data.telefone.toString(),",
+    "    empresa: (data.empresa || '').toString(),",
+    "    extra: (data.extra || '').toString(),",
+    "    vencimento: (data.vencimento || '').toString()",
+    "  };",
+    "",
+    "  UrlFetchApp.fetch(ZAPVIBE_URL, {",
+    "    method: 'post',",
+    "    contentType: 'application/json',",
+    "    payload: JSON.stringify(payload),",
+    "    muteHttpExceptions: true",
+    "  });",
+    "}"
+  ].join('\\n')
+}
+
+async function openWebhookInfoModal() {
+  document.getElementById('webhook-info-modal').classList.remove('hidden')
+  const info = await fetch('/api/contacts/webhook-info').then(r=>r.json()).catch(()=>({}))
+  document.getElementById('wh-url').value = info.url || ''
+  document.getElementById('wh-token').value = info.token || ''
+  document.getElementById('wh-script').value = buildAppsScript(info.url || '', info.token || '')
+}
+
+function closeWebhookInfoModal() {
+  document.getElementById('webhook-info-modal').classList.add('hidden')
+}
+
+function copyWebhookField(id) {
+  const el = document.getElementById(id)
+  el.select()
+  el.setSelectionRange(0, 999999)
+  document.execCommand('copy')
 }
 
 // ── Campaign ──────────────────────────────────────────────────────────────────
@@ -2943,6 +3037,24 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // Webhook — público, autenticado por token (planilha Google/Excel chama esta)
+  if (url === '/api/contacts/webhook' && method === 'POST') {
+    const body = await readBody(req)
+    const user = await db.getUserByWebhookToken(body.token).catch(() => null)
+    if (!user) { json({ error: 'Token inválido' }, 401); return }
+    const telefone = (body.telefone || '').toString().trim()
+    if (!telefone) { json({ error: 'telefone obrigatório' }, 400); return }
+    try {
+      const r = await db.upsertContactByPhone({
+        nome: body.nome || '', telefone, empresa: body.empresa || '', extra: body.extra || '', vencimento: body.vencimento || ''
+      }, user.id)
+      json({ ok: true, ...r })
+    } catch (e) {
+      json({ error: e.message }, 400)
+    }
+    return
+  }
+
   // Public landing page
   if (url === '/' || url === '/index.html') {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
@@ -3028,6 +3140,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Contacts
+  if (url === '/api/contacts/webhook-info' && method === 'GET') {
+    const token = await db.getOrCreateWebhookToken(userId)
+    const baseUrl = process.env.WEBHOOK_BASE_URL || `http://host.docker.internal:${PORT}`
+    json({ token, url: `${baseUrl}/api/contacts/webhook` }); return
+  }
+
   if (url === '/api/contacts' && method === 'GET') {
     json(await db.getContacts(userId)); return
   }

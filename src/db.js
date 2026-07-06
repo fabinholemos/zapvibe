@@ -20,6 +20,7 @@ async function init() {
       name TEXT DEFAULT '',
       phone TEXT DEFAULT '',
       trial_ends_at TIMESTAMPTZ,
+      webhook_token TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -168,6 +169,7 @@ async function init() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS webhook_token TEXT;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS vencimento TEXT DEFAULT '';
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS optout BOOLEAN DEFAULT FALSE;
@@ -289,6 +291,42 @@ async function updateContact(oldTelefone, c, userId) {
 
 async function deleteContact(telefone, userId) {
   await pool.query('DELETE FROM contacts WHERE telefone=$1 AND user_id=$2', [telefone, userId])
+}
+
+// Upsert usado pelo webhook de planilha (Google Sheets/Excel): atualiza se o telefone
+// já existe pra esse usuário, cria se não existe. Nunca duplica.
+async function upsertContactByPhone(c, userId) {
+  const telefone = (c.telefone || '').replace(/\D/g, '')
+  if (!telefone) throw new Error('telefone obrigatório')
+  const { rows } = await pool.query('SELECT id FROM contacts WHERE user_id=$1 AND telefone=$2', [userId, telefone])
+  if (rows[0]) {
+    await pool.query(
+      'UPDATE contacts SET nome=$1, empresa=$2, extra=$3, vencimento=$4 WHERE id=$5',
+      [c.nome || '', c.empresa || '', c.extra || '', c.vencimento || '', rows[0].id]
+    )
+    return { created: false, updated: true }
+  }
+  await pool.query(
+    'INSERT INTO contacts (user_id, nome, telefone, empresa, extra, vencimento, optout) VALUES ($1,$2,$3,$4,$5,$6,FALSE)',
+    [userId, c.nome || '', telefone, c.empresa || '', c.extra || '', c.vencimento || '']
+  )
+  return { created: true, updated: false }
+}
+
+// ── Webhook token (integração planilha → ZapVibe) ─────────────────────────────
+
+async function getOrCreateWebhookToken(userId) {
+  const { rows } = await pool.query('SELECT webhook_token FROM users WHERE id=$1', [userId])
+  if (rows[0]?.webhook_token) return rows[0].webhook_token
+  const token = require('crypto').randomBytes(20).toString('hex')
+  await pool.query('UPDATE users SET webhook_token=$1 WHERE id=$2', [token, userId])
+  return token
+}
+
+async function getUserByWebhookToken(token) {
+  if (!token) return null
+  const { rows } = await pool.query('SELECT * FROM users WHERE webhook_token=$1', [token])
+  return rows[0] || null
 }
 
 // ── Draft template ────────────────────────────────────────────────────────────
@@ -905,7 +943,8 @@ async function updateFollowupStatus(id, status) {
 
 module.exports = {
   init, ping,
-  getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout,
+  getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout, upsertContactByPhone,
+  getOrCreateWebhookToken, getUserByWebhookToken,
   getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, updateUserInstanceEnabled, deleteUserInstance,
   getDraft, saveDraft,
   getTemplates, getTemplateById, addTemplate, updateTemplate, deleteTemplate,
