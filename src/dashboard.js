@@ -2362,21 +2362,66 @@ async function saveVencRule() {
   loadVencimentoRules()
 }
 
+function parseVencimentoDateJS(str) {
+  if (!str) return null
+  str = str.trim()
+  let parts = str.split('/')
+  if (parts.length === 3) {
+    const d = parseInt(parts[0]), mo = parseInt(parts[1]), y = parseInt(parts[2])
+    if (d && mo && y) return new Date(y, mo - 1, d)
+  }
+  if (parts.length === 2) {
+    const d = parseInt(parts[0]), mo = parseInt(parts[1])
+    if (d && mo) return new Date(new Date().getFullYear(), mo - 1, d)
+  }
+  parts = str.split('-')
+  if (parts.length === 3 && parts[0].length === 4) {
+    const y = parseInt(parts[0]), mo = parseInt(parts[1]), d = parseInt(parts[2])
+    if (y && mo && d) return new Date(y, mo - 1, d)
+  }
+  return null
+}
+
+function fmtDataBr(d) {
+  return String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + d.getFullYear()
+}
+
 async function loadVencimentoRules() {
   const rules = await fetch('/api/vencimento-rules').then(r=>r.json()).catch(()=>[])
   const el = document.getElementById('venc-list')
   if (!rules.length) { el.innerHTML='<p class="text-xs text-gray-600 text-center py-4">Nenhuma regra criada.</p>'; return }
-  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  const [groups, allContacts] = await Promise.all([
+    fetch('/api/groups').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/contacts').then(r=>r.json()).catch(()=>[])
+  ])
   el.innerHTML = rules.map(r => {
     const grp = r.groupId ? groups.find(g => g.id === r.groupId) : null
     const groupTag = r.contactPhones?.length
       ? \`👤 \${r.contactPhones.length} contato(s) selecionado(s)\`
       : (grp ? \`📁 \${esc(grp.name)}\` : (r.groupId ? '⚠️ grupo excluído' : 'Todos os contatos'))
+
+    let previewLine = ''
+    if (r.contactPhones?.length) {
+      const previews = r.contactPhones.map(phone => {
+        const c = allContacts.find(c => c.telefone.replace(/\D/g,'') === phone)
+        if (!c) return null
+        const vencDate = parseVencimentoDateJS(c.vencimento)
+        if (!vencDate) return { nome: c.nome, texto: 'vencimento inválido' }
+        const disparoDate = new Date(vencDate)
+        disparoDate.setDate(disparoDate.getDate() - parseInt(r.daysBefore))
+        return { nome: c.nome, texto: fmtDataBr(disparoDate) }
+      }).filter(Boolean)
+      if (previews.length) {
+        previewLine = \`<p class="text-xs text-gray-600 mt-0.5">Dispara em: \${previews.map(p => \`\${p.texto} (\${esc(p.nome)})\`).join(' · ')}</p>\`
+      }
+    }
+
     return \`
     <div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2.5">
       <div class="flex-1 min-w-0 mr-3">
         <p class="text-xs font-medium">\${esc(r.name)}</p>
         <p class="text-xs text-gray-500">\${r.daysBefore} dia\${r.daysBefore!==1?'s':''} antes do vencimento · \${groupTag}</p>
+        \${previewLine}
       </div>
       <div class="flex items-center gap-2">
         <label class="flex items-center gap-1 cursor-pointer">
