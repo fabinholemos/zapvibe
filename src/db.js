@@ -121,6 +121,7 @@ async function init() {
       template_name TEXT DEFAULT '',
       group_id TEXT DEFAULT '',
       contact_phones JSONB DEFAULT '[]',
+      instance_name TEXT DEFAULT '',
       active BOOLEAN DEFAULT TRUE,
       last_run_date TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
@@ -209,6 +210,7 @@ async function init() {
     ALTER TABLE drip_queue ADD COLUMN IF NOT EXISTS instance_name TEXT;
     ALTER TABLE vencimento_rules ADD COLUMN IF NOT EXISTS group_id TEXT DEFAULT '';
     ALTER TABLE vencimento_rules ADD COLUMN IF NOT EXISTS contact_phones JSONB DEFAULT '[]';
+    ALTER TABLE vencimento_rules ADD COLUMN IF NOT EXISTS instance_name TEXT DEFAULT '';
     ALTER TABLE scheduled_campaigns ADD COLUMN IF NOT EXISTS contact_phones JSONB DEFAULT '[]';
   `).catch(() => {})
 
@@ -788,7 +790,7 @@ async function getVencimentoRules(userId) {
   const { rows } = await pool.query(
     `SELECT id, name, days_before as "daysBefore", template_content as "templateContent",
             template_id as "templateId", template_name as "templateName", group_id as "groupId",
-            contact_phones as "contactPhones",
+            contact_phones as "contactPhones", instance_name as "instanceName",
             active, last_run_date as "lastRunDate", created_at as "createdAt"
      FROM vencimento_rules WHERE user_id=$1 ORDER BY created_at`,
     [userId]
@@ -798,13 +800,13 @@ async function getVencimentoRules(userId) {
 
 async function addVencimentoRule(r, userId) {
   const { rows } = await pool.query(
-    `INSERT INTO vencimento_rules (id, user_id, name, days_before, template_content, template_id, template_name, group_id, contact_phones, active)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `INSERT INTO vencimento_rules (id, user_id, name, days_before, template_content, template_id, template_name, group_id, contact_phones, instance_name, active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING id, name, days_before as "daysBefore", template_content as "templateContent",
                template_id as "templateId", template_name as "templateName", group_id as "groupId",
-               contact_phones as "contactPhones",
+               contact_phones as "contactPhones", instance_name as "instanceName",
                active, last_run_date as "lastRunDate"`,
-    [r.id, userId, r.name, r.daysBefore, r.templateContent, r.templateId || null, r.templateName || '', r.groupId || '', JSON.stringify(r.contactPhones || []), r.active !== false]
+    [r.id, userId, r.name, r.daysBefore, r.templateContent, r.templateId || null, r.templateName || '', r.groupId || '', JSON.stringify(r.contactPhones || []), r.instanceName || '', r.active !== false]
   )
   return rows[0]
 }
@@ -813,8 +815,8 @@ async function updateVencimentoRule(id, updates, userId) {
   const { rows } = await pool.query('SELECT * FROM vencimento_rules WHERE id=$1 AND user_id=$2', [id, userId])
   const cur = rows[0]; if (!cur) return
   await pool.query(
-    `UPDATE vencimento_rules SET name=$1, days_before=$2, template_content=$3, template_id=$4, template_name=$5, group_id=$6, contact_phones=$7, active=$8
-     WHERE id=$9 AND user_id=$10`,
+    `UPDATE vencimento_rules SET name=$1, days_before=$2, template_content=$3, template_id=$4, template_name=$5, group_id=$6, contact_phones=$7, instance_name=$8, active=$9
+     WHERE id=$10 AND user_id=$11`,
     [
       updates.name !== undefined ? updates.name : cur.name,
       updates.daysBefore !== undefined ? updates.daysBefore : cur.days_before,
@@ -823,6 +825,7 @@ async function updateVencimentoRule(id, updates, userId) {
       updates.templateName !== undefined ? updates.templateName : cur.template_name,
       updates.groupId !== undefined ? updates.groupId : cur.group_id,
       updates.contactPhones !== undefined ? JSON.stringify(updates.contactPhones) : cur.contact_phones,
+      updates.instanceName !== undefined ? updates.instanceName : cur.instance_name,
       updates.active !== undefined ? updates.active : cur.active,
       id, userId
     ]

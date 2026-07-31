@@ -231,6 +231,12 @@ textarea{resize:vertical}
             </select>
           </div>
         </div>
+        <div>
+          <label class="text-xs text-gray-500 block mb-1">Qual WhatsApp dispara essa regra</label>
+          <select id="vf-instance" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+            <option value="">Padrão da conta</option>
+          </select>
+        </div>
 
         <div>
           <button type="button" onclick="toggleVfPicker()" class="w-full flex items-center justify-between bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-left">
@@ -2273,14 +2279,18 @@ async function openVencForm() {
   vfSelectedPhones = new Set()
   document.getElementById('vf-picker-panel').classList.add('hidden')
   document.getElementById('vf-picker-arrow').textContent = '▾'
-  const [groups, allContacts] = await Promise.all([
+  const [groups, allContacts, instances] = await Promise.all([
     fetch('/api/groups').then(r=>r.json()).catch(()=>[]),
-    fetch('/api/contacts').then(r=>r.json()).catch(()=>[])
+    fetch('/api/contacts').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/instances').then(r=>r.json()).catch(()=>[])
   ])
   vfAllGroups = groups
   vfAllContacts = allContacts
   const sel = document.getElementById('vf-group')
   sel.innerHTML = '<option value="">Todos os contatos</option>' + groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`).join('')
+  const instSel = document.getElementById('vf-instance')
+  const activeInstances = instances.filter(i => i.enabled !== false)
+  instSel.innerHTML = '<option value="">Padrão da conta</option>' + activeInstances.map(i=>\`<option value="\${esc(i.instanceName)}">📱 \${esc(i.label||i.instanceName)}</option>\`).join('')
   renderVfPicker()
 }
 
@@ -2290,6 +2300,7 @@ function closeVencForm() {
   document.getElementById('vf-days').value='3'
   document.getElementById('vf-content').value=''
   document.getElementById('vf-group').value=''
+  document.getElementById('vf-instance').value=''
   vfSelectedPhones = new Set()
 }
 
@@ -2354,10 +2365,11 @@ async function saveVencRule() {
   const name = document.getElementById('vf-name').value.trim()
   const daysBefore = parseInt(document.getElementById('vf-days').value) || 3
   const groupId = document.getElementById('vf-group').value
+  const instanceName = document.getElementById('vf-instance').value
   const templateContent = document.getElementById('vf-content').value.trim()
   if (!name || !templateContent) { alert('Preencha nome e mensagem.'); return }
   const contactPhones = [...vfSelectedPhones]
-  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, groupId, contactPhones, templateContent }) })
+  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, groupId, contactPhones, instanceName, templateContent }) })
   closeVencForm()
   loadVencimentoRules()
 }
@@ -2390,15 +2402,18 @@ async function loadVencimentoRules() {
   const rules = await fetch('/api/vencimento-rules').then(r=>r.json()).catch(()=>[])
   const el = document.getElementById('venc-list')
   if (!rules.length) { el.innerHTML='<p class="text-xs text-gray-600 text-center py-4">Nenhuma regra criada.</p>'; return }
-  const [groups, allContacts] = await Promise.all([
+  const [groups, allContacts, instances] = await Promise.all([
     fetch('/api/groups').then(r=>r.json()).catch(()=>[]),
-    fetch('/api/contacts').then(r=>r.json()).catch(()=>[])
+    fetch('/api/contacts').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/instances').then(r=>r.json()).catch(()=>[])
   ])
   el.innerHTML = rules.map(r => {
     const grp = r.groupId ? groups.find(g => g.id === r.groupId) : null
     const groupTag = r.contactPhones?.length
       ? \`👤 \${r.contactPhones.length} contato(s) selecionado(s)\`
       : (grp ? \`📁 \${esc(grp.name)}\` : (r.groupId ? '⚠️ grupo excluído' : 'Todos os contatos'))
+    const inst = r.instanceName ? instances.find(i => i.instanceName === r.instanceName) : null
+    const instTag = r.instanceName ? \`📱 \${esc(inst?.label || r.instanceName)}\` : '📱 Padrão da conta'
 
     let previewLine = ''
     if (r.contactPhones?.length) {
@@ -2420,7 +2435,7 @@ async function loadVencimentoRules() {
     <div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2.5">
       <div class="flex-1 min-w-0 mr-3">
         <p class="text-xs font-medium">\${esc(r.name)}</p>
-        <p class="text-xs text-gray-500">\${r.daysBefore} dia\${r.daysBefore!==1?'s':''} antes do vencimento · \${groupTag}</p>
+        <p class="text-xs text-gray-500">\${r.daysBefore} dia\${r.daysBefore!==1?'s':''} antes do vencimento · \${groupTag} · \${instTag}</p>
         \${previewLine}
       </div>
       <div class="flex items-center gap-2">
@@ -3653,7 +3668,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/vencimento-rules' && method === 'POST') {
     const body = await readBody(req)
     if (!body.name?.trim() || !body.templateContent?.trim()) { json({ error: 'name e templateContent obrigatórios' }, 400); return }
-    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', contactPhones: Array.isArray(body.contactPhones) ? body.contactPhones : [], active: true }, userId)); return
+    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', contactPhones: Array.isArray(body.contactPhones) ? body.contactPhones : [], instanceName: body.instanceName || '', active: true }, userId)); return
   }
   if (url.startsWith('/api/vencimento-rules/') && method === 'PUT') {
     const body = await readBody(req)

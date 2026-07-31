@@ -69,7 +69,7 @@ async function checkVencimentos() {
           contacts = grp ? contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, ''))) : []
         }
         if (contacts.length) {
-          const instanceName = user.instance_name || INSTANCE
+          const instanceName = rule.instanceName || user.instance_name || INSTANCE
           runCampaign(contacts, rule.templateContent, 8000, 20000, 500, false, null, rule.templateId, rule.name, user.id, instanceName)
             .catch(e => console.error('[Vencimento]', e.message))
         }
