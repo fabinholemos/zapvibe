@@ -2308,7 +2308,8 @@ async function loadVfContactsPicker() {
 function renderVfPicker() {
   const groupId = document.getElementById('vf-group').value
   const grp = groupId ? vfAllGroups.find(g => g.id === groupId) : null
-  const lista = grp ? vfAllContacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g,''))) : vfAllContacts
+  const lista = (grp ? vfAllContacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g,''))) : [...vfAllContacts])
+    .sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR'))
 
   const panel = document.getElementById('vf-picker-panel')
   if (!lista.length) {
