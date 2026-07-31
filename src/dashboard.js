@@ -226,18 +226,26 @@ textarea{resize:vertical}
           </div>
           <div class="flex-1">
             <label class="text-xs text-gray-500 block mb-1">Grupo de contatos</label>
-            <select id="vf-group" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
+            <select id="vf-group" onchange="loadVfContactsPicker()" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500">
               <option value="">Todos os contatos</option>
             </select>
           </div>
         </div>
+
+        <div>
+          <button type="button" onclick="toggleVfPicker()" class="w-full flex items-center justify-between bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-left">
+            <span id="vf-picker-summary" class="text-gray-400">Enviar pra todo mundo do grupo (clique pra escolher pessoas específicas)</span>
+            <span id="vf-picker-arrow" class="text-gray-500">▾</span>
+          </button>
+          <div id="vf-picker-panel" class="hidden mt-2 bg-gray-900 border border-gray-700 rounded-xl p-2 max-h-56 overflow-y-auto space-y-1">
+            <p class="text-xs text-gray-600 text-center py-3">Carregando contatos...</p>
+          </div>
+        </div>
+
         <div>
           <label class="text-xs text-gray-500 block mb-1">Mensagem (use {nome}, {vencimento}, {empresa})</label>
           <textarea id="vf-content" rows="4" placeholder="Olá {nome}, seu serviço vence em {vencimento}. Renove agora!" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500 resize-none"></textarea>
         </div>
-        <p class="text-xs text-gray-500">
-          Quer que a regra valha só pra algumas pessoas do grupo (não todo mundo)? <button onclick="tab('contacts')" class="text-violet-400 hover:text-violet-300 underline">Abra a aba Contatos</button>, marque os contatos que quiser e volte aqui antes de salvar — a seleção é aproveitada na regra. Sem seleção, vale o grupo inteiro.
-        </p>
         <div class="flex gap-2">
           <button onclick="saveVencRule()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
           <button onclick="closeVencForm()" class="flex-1 py-2 bg-gray-700 text-gray-300 text-sm rounded-xl">Cancelar</button>
@@ -2256,13 +2264,90 @@ async function deleteSchedule(id) {
 }
 
 // ── Vencimento rules ──────────────────────────────────────────────────────────
+let vfAllContacts = []
+let vfAllGroups = []
+let vfSelectedPhones = new Set()
+
 async function openVencForm() {
   document.getElementById('venc-form').classList.remove('hidden')
-  const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
+  vfSelectedPhones = new Set()
+  document.getElementById('vf-picker-panel').classList.add('hidden')
+  document.getElementById('vf-picker-arrow').textContent = '▾'
+  const [groups, allContacts] = await Promise.all([
+    fetch('/api/groups').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/contacts').then(r=>r.json()).catch(()=>[])
+  ])
+  vfAllGroups = groups
+  vfAllContacts = allContacts
   const sel = document.getElementById('vf-group')
   sel.innerHTML = '<option value="">Todos os contatos</option>' + groups.map(g=>\`<option value="\${g.id}">📁 \${esc(g.name)}</option>\`).join('')
+  renderVfPicker()
 }
-function closeVencForm() { document.getElementById('venc-form').classList.add('hidden'); document.getElementById('vf-name').value=''; document.getElementById('vf-days').value='3'; document.getElementById('vf-content').value=''; document.getElementById('vf-group').value='' }
+
+function closeVencForm() {
+  document.getElementById('venc-form').classList.add('hidden')
+  document.getElementById('vf-name').value=''
+  document.getElementById('vf-days').value='3'
+  document.getElementById('vf-content').value=''
+  document.getElementById('vf-group').value=''
+  vfSelectedPhones = new Set()
+}
+
+function toggleVfPicker() {
+  const panel = document.getElementById('vf-picker-panel')
+  const isHidden = panel.classList.contains('hidden')
+  panel.classList.toggle('hidden', !isHidden)
+  document.getElementById('vf-picker-arrow').textContent = isHidden ? '▴' : '▾'
+}
+
+async function loadVfContactsPicker() {
+  vfSelectedPhones = new Set()
+  renderVfPicker()
+}
+
+function renderVfPicker() {
+  const groupId = document.getElementById('vf-group').value
+  const grp = groupId ? vfAllGroups.find(g => g.id === groupId) : null
+  const lista = grp ? vfAllContacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g,''))) : vfAllContacts
+
+  const panel = document.getElementById('vf-picker-panel')
+  if (!lista.length) {
+    panel.innerHTML = '<p class="text-xs text-gray-600 text-center py-3">Nenhum contato nesse grupo.</p>'
+  } else {
+    panel.innerHTML = lista.map(c => {
+      const phone = c.telefone.replace(/\D/g,'')
+      const checked = vfSelectedPhones.has(phone) ? 'checked' : ''
+      return \`
+      <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-800 rounded-lg cursor-pointer">
+        <input type="checkbox" \${checked} onchange="toggleVfContact('\${phone}', this.checked)" class="w-3.5 h-3.5 accent-violet-600"/>
+        <span class="text-xs text-gray-300">\${esc(c.nome)}</span>
+        <span class="text-xs text-gray-600 ml-auto">\${phone}</span>
+      </label>\`
+    }).join('')
+  }
+  updateVfPickerSummary()
+}
+
+function toggleVfContact(phone, checked) {
+  if (checked) vfSelectedPhones.add(phone)
+  else vfSelectedPhones.delete(phone)
+  updateVfPickerSummary()
+}
+
+function updateVfPickerSummary() {
+  const el = document.getElementById('vf-picker-summary')
+  if (vfSelectedPhones.size === 0) {
+    el.textContent = 'Enviar pra todo mundo do grupo (clique pra escolher pessoas específicas)'
+    el.className = 'text-gray-400'
+    return
+  }
+  const nomes = vfAllContacts
+    .filter(c => vfSelectedPhones.has(c.telefone.replace(/\D/g,'')))
+    .map(c => c.nome)
+  const preview = nomes.slice(0, 3).join(', ') + (nomes.length > 3 ? \` e mais \${nomes.length - 3}\` : '')
+  el.textContent = \`👤 \${vfSelectedPhones.size} selecionado(s): \${preview}\`
+  el.className = 'text-violet-300'
+}
 
 async function saveVencRule() {
   const name = document.getElementById('vf-name').value.trim()
@@ -2270,7 +2355,7 @@ async function saveVencRule() {
   const groupId = document.getElementById('vf-group').value
   const templateContent = document.getElementById('vf-content').value.trim()
   if (!name || !templateContent) { alert('Preencha nome e mensagem.'); return }
-  const contactPhones = selected.size > 0 ? contacts.filter((_,i) => selected.has(i)).map(c => c.telefone.replace(/\D/g,'')) : []
+  const contactPhones = [...vfSelectedPhones]
   await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, groupId, contactPhones, templateContent }) })
   closeVencForm()
   loadVencimentoRules()
