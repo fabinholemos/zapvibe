@@ -60,7 +60,10 @@ async function checkVencimentos() {
           if (!d) return false
           return d.getDate() === targetDate.getDate() && d.getMonth() === targetDate.getMonth()
         })
-        if (rule.groupId) {
+        if (rule.contactPhones && rule.contactPhones.length) {
+          const phoneSet = new Set(rule.contactPhones)
+          contacts = contacts.filter(c => phoneSet.has(c.telefone.replace(/\D/g, '')))
+        } else if (rule.groupId) {
           const groups = await db.getGroups(user.id).catch(() => [])
           const grp = groups.find(g => g.id === rule.groupId)
           contacts = grp ? contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, ''))) : []

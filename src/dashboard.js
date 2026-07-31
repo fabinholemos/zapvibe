@@ -235,6 +235,9 @@ textarea{resize:vertical}
           <label class="text-xs text-gray-500 block mb-1">Mensagem (use {nome}, {vencimento}, {empresa})</label>
           <textarea id="vf-content" rows="4" placeholder="Olá {nome}, seu serviço vence em {vencimento}. Renove agora!" class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500 resize-none"></textarea>
         </div>
+        <p class="text-xs text-gray-500">
+          Quer que a regra valha só pra algumas pessoas do grupo (não todo mundo)? <button onclick="tab('contacts')" class="text-violet-400 hover:text-violet-300 underline">Abra a aba Contatos</button>, marque os contatos que quiser e volte aqui antes de salvar — a seleção é aproveitada na regra. Sem seleção, vale o grupo inteiro.
+        </p>
         <div class="flex gap-2">
           <button onclick="saveVencRule()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
           <button onclick="closeVencForm()" class="flex-1 py-2 bg-gray-700 text-gray-300 text-sm rounded-xl">Cancelar</button>
@@ -2267,7 +2270,8 @@ async function saveVencRule() {
   const groupId = document.getElementById('vf-group').value
   const templateContent = document.getElementById('vf-content').value.trim()
   if (!name || !templateContent) { alert('Preencha nome e mensagem.'); return }
-  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, groupId, templateContent }) })
+  const contactPhones = selected.size > 0 ? contacts.filter((_,i) => selected.has(i)).map(c => c.telefone.replace(/\D/g,'')) : []
+  await fetch('/api/vencimento-rules', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, daysBefore, groupId, contactPhones, templateContent }) })
   closeVencForm()
   loadVencimentoRules()
 }
@@ -2279,7 +2283,9 @@ async function loadVencimentoRules() {
   const groups = await fetch('/api/groups').then(r=>r.json()).catch(()=>[])
   el.innerHTML = rules.map(r => {
     const grp = r.groupId ? groups.find(g => g.id === r.groupId) : null
-    const groupTag = grp ? \`📁 \${esc(grp.name)}\` : (r.groupId ? '⚠️ grupo excluído' : 'Todos os contatos')
+    const groupTag = r.contactPhones?.length
+      ? \`👤 \${r.contactPhones.length} contato(s) selecionado(s)\`
+      : (grp ? \`📁 \${esc(grp.name)}\` : (r.groupId ? '⚠️ grupo excluído' : 'Todos os contatos'))
     return \`
     <div class="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2.5">
       <div class="flex-1 min-w-0 mr-3">
@@ -3516,7 +3522,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/vencimento-rules' && method === 'POST') {
     const body = await readBody(req)
     if (!body.name?.trim() || !body.templateContent?.trim()) { json({ error: 'name e templateContent obrigatórios' }, 400); return }
-    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', active: true }, userId)); return
+    json(await db.addVencimentoRule({ id: Date.now().toString(), name: body.name.trim(), daysBefore: parseInt(body.daysBefore) || 3, templateContent: body.templateContent.trim(), templateId: body.templateId || null, templateName: body.templateName || '', groupId: body.groupId || '', contactPhones: Array.isArray(body.contactPhones) ? body.contactPhones : [], active: true }, userId)); return
   }
   if (url.startsWith('/api/vencimento-rules/') && method === 'PUT') {
     const body = await readBody(req)
