@@ -1,5 +1,5 @@
 const db = require('./db')
-const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappMedia, detectMediatype, INSTANCE } = require('./whatsapp')
+const { applyTemplate, formatPhone, sleep, fetchApi, sendWhatsapp, sendWhatsappMedia, detectMediatype, downloadMedia, INSTANCE } = require('./whatsapp')
 const { rememberOutboundMessage, isRecentOutboundMessage } = require('./campaign')
 
 const replyTracker = new Map()
@@ -175,6 +175,38 @@ async function processWebhook(data) {
   if (isRecentOutboundMessage(userId, phone, text)) {
     console.log('[Webhook] ignorado: eco de mensagem enviada recentemente para', phone)
     return
+  }
+
+  // Comprovante de pagamento — imagem recebida de um contato conhecido vira "pagamento pendente"
+  if (msg.message?.imageMessage) {
+    const allCtsImg = await db.getContacts(userId).catch(() => [])
+    const payContact = allCtsImg.find(c => {
+      const n = c.telefone.replace(/\D/g, '')
+      return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
+    })
+    if (payContact && !payContact.optout) {
+      try {
+        const media = await downloadMedia(instanceName, msg.key.id)
+        if (media?.base64) {
+          await db.addPendingPayment({
+            id: `pay_${Date.now()}_${phone}`,
+            telefone: payContact.telefone,
+            nome: payContact.nome || pushName || '',
+            imageBase64: media.base64,
+            mimetype: media.mimetype || 'image/jpeg'
+          }, userId)
+          const confirmText = 'Recebemos seu comprovante! Vamos confirmar e já atualizamos sua renovação. ✓'
+          rememberOutboundMessage(userId, phone, confirmText)
+          await sendWhatsapp(sendTo, confirmText, instanceName).catch(() => {})
+          console.log('[Pagamento] comprovante recebido de', phone, '(', payContact.nome, ')')
+        } else {
+          console.log('[Pagamento] mídia sem base64 para', phone)
+        }
+      } catch (e) {
+        console.log('[Pagamento] erro ao baixar mídia:', e.message)
+      }
+      return
+    }
   }
 
   // Opt-out detection — before cooldown check so it always works

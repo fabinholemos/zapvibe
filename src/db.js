@@ -126,6 +126,17 @@ async function init() {
       last_run_date TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS pending_payments (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      telefone TEXT NOT NULL,
+      nome TEXT DEFAULT '',
+      image_base64 TEXT,
+      mimetype TEXT DEFAULT 'image/jpeg',
+      status TEXT DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      confirmed_at TIMESTAMPTZ
+    );
     CREATE TABLE IF NOT EXISTS drips (
       id TEXT PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
@@ -315,6 +326,58 @@ async function upsertContactByPhone(c, userId) {
     [userId, c.nome || '', telefone, c.empresa || '', c.extra || '', c.vencimento || '']
   )
   return { created: true, updated: false }
+}
+
+// ── Pagamentos pendentes (comprovante manual via WhatsApp) ────────────────────
+
+function addMonthToVencimento(str) {
+  if (!str) return null
+  const m = str.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (!m) return null
+  const d = new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]))
+  d.setMonth(d.getMonth() + 1)
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getFullYear()}`
+}
+
+async function addPendingPayment(p, userId) {
+  await pool.query(
+    `INSERT INTO pending_payments (id, user_id, telefone, nome, image_base64, mimetype, status)
+     VALUES ($1,$2,$3,$4,$5,$6,'pending')`,
+    [p.id, userId, p.telefone, p.nome || '', p.imageBase64, p.mimetype || 'image/jpeg']
+  )
+}
+
+async function getPendingPayments(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, telefone, nome, image_base64 as "imageBase64", mimetype, status, created_at as "createdAt"
+     FROM pending_payments WHERE user_id=$1 AND status='pending' ORDER BY created_at DESC`,
+    [userId]
+  )
+  return rows
+}
+
+async function confirmPendingPayment(id, userId) {
+  const { rows } = await pool.query('SELECT * FROM pending_payments WHERE id=$1 AND user_id=$2', [id, userId])
+  const p = rows[0]
+  if (!p) return { error: 'Pagamento não encontrado' }
+  await pool.query(`UPDATE pending_payments SET status='confirmed', confirmed_at=NOW() WHERE id=$1`, [id])
+
+  const { rows: crows } = await pool.query('SELECT * FROM contacts WHERE user_id=$1 AND telefone=$2', [userId, p.telefone])
+  const contact = crows[0]
+  let novoVencimento = null
+  if (contact) {
+    novoVencimento = addMonthToVencimento(contact.vencimento)
+    if (novoVencimento) {
+      await pool.query('UPDATE contacts SET vencimento=$1 WHERE id=$2', [novoVencimento, contact.id])
+    }
+  }
+  return { ok: true, novoVencimento }
+}
+
+async function rejectPendingPayment(id, userId) {
+  await pool.query(`UPDATE pending_payments SET status='rejected' WHERE id=$1 AND user_id=$2`, [id, userId])
 }
 
 // ── Webhook token (integração planilha → ZapVibe) ─────────────────────────────
@@ -953,6 +1016,7 @@ module.exports = {
   init, ping,
   getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout, upsertContactByPhone,
   getOrCreateWebhookToken, getUserByWebhookToken,
+  addPendingPayment, getPendingPayments, confirmPendingPayment, rejectPendingPayment,
   getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, updateUserInstanceEnabled, deleteUserInstance,
   getDraft, saveDraft,
   getTemplates, getTemplateById, addTemplate, updateTemplate, deleteTemplate,

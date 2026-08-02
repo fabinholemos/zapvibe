@@ -159,6 +159,17 @@ textarea{resize:vertical}
       <button onclick="loadHistory()" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg transition-colors">↻ Atualizar</button>
     </div>
 
+    <!-- Pagamentos pendentes (comprovante manual) -->
+    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs text-gray-500 uppercase tracking-wider">💳 Pagamentos pendentes</p>
+        <button onclick="loadPendingPayments()" class="text-xs text-gray-500 hover:text-gray-300">↻</button>
+      </div>
+      <div id="pending-payments-list" class="space-y-2">
+        <p class="text-xs text-gray-600 text-center py-4">Carregando...</p>
+      </div>
+    </div>
+
     <!-- Anti-spam summary -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
       <p class="text-xs text-gray-500 uppercase tracking-wider mb-3">Última mensagem por contato</p>
@@ -879,7 +890,7 @@ function tab(id) {
   if (id === 'campaign') { loadTemplate(); updateCampSummary(); loadGroupsForCampaign(); loadInstances() }
   if (id === 'auto') { loadAutoList(); checkWebhookStatus() }
   if (id === 'auto2') { loadVencimentoRules(); loadDrips(); loadScheduledList() }
-  if (id === 'hist') loadHistory()
+  if (id === 'hist') { loadHistory(); loadPendingPayments() }
 }
 
 // ── Connection ────────────────────────────────────────────────────────────────
@@ -2067,6 +2078,42 @@ async function addWaGroup() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Adicionar' }
   }
+}
+
+// ── Histórico ─────────────────────────────────────────────────────────────────
+async function loadPendingPayments() {
+  const list = await fetch('/api/pending-payments').then(r=>r.json()).catch(()=>[])
+  const el = document.getElementById('pending-payments-list')
+  if (!list.length) { el.innerHTML = '<p class="text-xs text-gray-600 text-center py-4">Nenhum comprovante aguardando confirmação.</p>'; return }
+  el.innerHTML = list.map(p => {
+    const when = new Date(p.createdAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+    return \`
+    <div class="flex gap-3 bg-gray-800 rounded-xl p-3">
+      <img src="data:\${p.mimetype};base64,\${p.imageBase64}" class="w-16 h-16 object-cover rounded-lg cursor-pointer flex-shrink-0" onclick="window.open(this.src)"/>
+      <div class="flex-1 min-w-0">
+        <p class="text-xs font-medium">\${esc(p.nome || 'Sem nome')}</p>
+        <p class="text-xs text-gray-500">\${esc(p.telefone)} · \${when}</p>
+        <div class="flex gap-2 mt-2">
+          <button onclick="confirmPendingPayment('\${p.id}')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg">✓ Confirmar pagamento</button>
+          <button onclick="rejectPendingPayment('\${p.id}')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-lg">✕ Rejeitar</button>
+        </div>
+      </div>
+    </div>
+  \`
+  }).join('')
+}
+
+async function confirmPendingPayment(id) {
+  const r = await fetch(\`/api/pending-payments/\${id}/confirm\`, { method:'POST' }).then(r=>r.json()).catch(()=>({}))
+  if (r.error) { alert(r.error); return }
+  alert(r.novoVencimento ? \`Pagamento confirmado! Novo vencimento: \${r.novoVencimento}\` : 'Pagamento confirmado!')
+  loadPendingPayments()
+}
+
+async function rejectPendingPayment(id) {
+  if (!confirm('Rejeitar esse comprovante? Ele vai sumir da lista sem alterar o vencimento.')) return
+  await fetch(\`/api/pending-payments/\${id}/reject\`, { method:'POST' })
+  loadPendingPayments()
 }
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
@@ -3304,6 +3351,19 @@ const server = http.createServer(async (req, res) => {
     const token = await db.getOrCreateWebhookToken(userId)
     const baseUrl = process.env.WEBHOOK_BASE_URL || `http://host.docker.internal:${PORT}`
     json({ token, url: `${baseUrl}/api/contacts/webhook` }); return
+  }
+
+  if (url === '/api/pending-payments' && method === 'GET') {
+    json(await db.getPendingPayments(userId)); return
+  }
+  if (url.startsWith('/api/pending-payments/') && url.endsWith('/confirm') && method === 'POST') {
+    const id = url.split('/')[3]
+    json(await db.confirmPendingPayment(id, userId)); return
+  }
+  if (url.startsWith('/api/pending-payments/') && url.endsWith('/reject') && method === 'POST') {
+    const id = url.split('/')[3]
+    await db.rejectPendingPayment(id, userId)
+    json({ ok: true }); return
   }
 
   if (url === '/api/contacts' && method === 'GET') {

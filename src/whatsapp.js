@@ -70,6 +70,12 @@ async function sendWhatsappMedia(phone, caption, media, instanceName) {
   })
 }
 
+async function downloadMedia(instanceName, messageId) {
+  return fetchApi(`/chat/getBase64FromMediaMessage/${instanceName}`, 'POST', {
+    message: { key: { id: messageId } }
+  })
+}
+
 async function notifyAdminNewUser(name, email, phone) {
   const adminPhone = process.env.ADMIN_PHONE
   const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase()
@@ -138,6 +144,6 @@ async function connectInstance(instanceName = INSTANCE) {
 }
 module.exports = {
   applyTemplate, formatPhone, sleep, fetchApi,
-  sendWhatsapp, sendWhatsappMedia, sendMessage, checkStatus, connectInstance, notifyAdminNewUser, detectMediatype, personalizeWithAI,
+  sendWhatsapp, sendWhatsappMedia, sendMessage, checkStatus, connectInstance, notifyAdminNewUser, detectMediatype, personalizeWithAI, downloadMedia,
   API_URL, API_KEY, INSTANCE
 }
