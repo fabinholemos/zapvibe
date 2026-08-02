@@ -44,8 +44,8 @@ async function checkSchedules() {
 
 async function checkVencimentos() {
   try {
-    const today = new Date()
-    const todayStr = today.toISOString().slice(0, 10)
+    const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }))
+    const todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0')
     const users = await db.getAllUsers().catch(() => [])
     for (const user of users) {
       if (user.status !== 'active' && user.role !== 'admin') continue
