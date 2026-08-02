@@ -361,10 +361,13 @@ async function getPendingPayments(userId) {
 }
 
 async function confirmPendingPayment(id, userId) {
-  const { rows } = await pool.query('SELECT * FROM pending_payments WHERE id=$1 AND user_id=$2', [id, userId])
+  const { rows } = await pool.query(
+    `UPDATE pending_payments SET status='confirmed', confirmed_at=NOW()
+     WHERE id=$1 AND user_id=$2 AND status='pending' RETURNING *`,
+    [id, userId]
+  )
   const p = rows[0]
-  if (!p) return { error: 'Pagamento não encontrado' }
-  await pool.query(`UPDATE pending_payments SET status='confirmed', confirmed_at=NOW() WHERE id=$1`, [id])
+  if (!p) return { error: 'Esse pagamento já foi processado ou não existe.' }
 
   const { rows: crows } = await pool.query('SELECT * FROM contacts WHERE user_id=$1 AND telefone=$2', [userId, p.telefone])
   const contact = crows[0]

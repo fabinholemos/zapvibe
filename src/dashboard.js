@@ -170,12 +170,6 @@ textarea{resize:vertical}
       </div>
     </div>
 
-    <!-- Lightbox de imagem (comprovante) -->
-    <div id="img-lightbox" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" onclick="closeImageLightbox()">
-      <img id="img-lightbox-img" src="" class="max-w-full max-h-full rounded-lg"/>
-      <button onclick="closeImageLightbox()" class="absolute top-4 right-4 text-white text-2xl">✕</button>
-    </div>
-
     <!-- Anti-spam summary -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
       <p class="text-xs text-gray-500 uppercase tracking-wider mb-3">Última mensagem por contato</p>
@@ -2087,28 +2081,40 @@ async function addWaGroup() {
 }
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
-function openImageLightbox(src) {
-  document.getElementById('img-lightbox-img').src = src
-  document.getElementById('img-lightbox').classList.remove('hidden')
-}
-function closeImageLightbox() {
-  document.getElementById('img-lightbox').classList.add('hidden')
+let pendingPaymentsCache = []
+
+function openComprovanteInNewTab(id) {
+  const p = pendingPaymentsCache.find(x => x.id === id)
+  if (!p) return
+  const byteChars = atob(p.imageBase64)
+  const byteNumbers = new Array(byteChars.length)
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i)
+  const byteArray = new Uint8Array(byteNumbers)
+  const blob = new Blob([byteArray], { type: p.mimetype })
+  const url = URL.createObjectURL(blob)
+  window.open(url, '_blank')
 }
 
 async function loadPendingPayments() {
   const list = await fetch('/api/pending-payments').then(r=>r.json()).catch(()=>[])
+  pendingPaymentsCache = list
   const el = document.getElementById('pending-payments-list')
   if (!list.length) { el.innerHTML = '<p class="text-xs text-gray-600 text-center py-4">Nenhum comprovante aguardando confirmação.</p>'; return }
   el.innerHTML = list.map(p => {
     const when = new Date(p.createdAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+    const isPdf = p.mimetype === 'application/pdf'
+    const preview = isPdf
+      ? \`<div onclick="openComprovanteInNewTab('\${p.id}')" class="w-16 h-16 flex items-center justify-center bg-gray-700 rounded-lg cursor-pointer flex-shrink-0 text-2xl">📄</div>\`
+      : \`<img src="data:\${p.mimetype};base64,\${p.imageBase64}" class="w-16 h-16 object-cover rounded-lg cursor-pointer flex-shrink-0" onclick="openComprovanteInNewTab('\${p.id}')"/>\`
     return \`
     <div class="flex gap-3 bg-gray-800 rounded-xl p-3">
-      <img src="data:\${p.mimetype};base64,\${p.imageBase64}" class="w-16 h-16 object-cover rounded-lg cursor-pointer flex-shrink-0" onclick="openImageLightbox(this.src)"/>
+      \${preview}
       <div class="flex-1 min-w-0">
         <p class="text-xs font-medium">\${esc(p.nome || 'Sem nome')}</p>
-        <p class="text-xs text-gray-500">\${esc(p.telefone)} · \${when}</p>
+        <p class="text-xs text-gray-500">\${esc(p.telefone)} · \${when} \${isPdf?'· PDF':''}</p>
+        <p class="text-xs text-violet-400 cursor-pointer" onclick="openComprovanteInNewTab('\${p.id}')">Abrir \${isPdf?'PDF':'imagem'} em nova aba ↗</p>
         <div class="flex gap-2 mt-2">
-          <button onclick="confirmPendingPayment('\${p.id}')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg">✓ Confirmar pagamento</button>
+          <button id="btn-confirm-\${p.id}" onclick="confirmPendingPayment('\${p.id}')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg">✓ Confirmar pagamento</button>
           <button onclick="rejectPendingPayment('\${p.id}')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-lg">✕ Rejeitar</button>
         </div>
       </div>
@@ -2118,8 +2124,10 @@ async function loadPendingPayments() {
 }
 
 async function confirmPendingPayment(id) {
+  const btn = document.getElementById(\`btn-confirm-\${id}\`)
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Confirmando...' }
   const r = await fetch(\`/api/pending-payments/\${id}/confirm\`, { method:'POST' }).then(r=>r.json()).catch(()=>({}))
-  if (r.error) { alert(r.error); return }
+  if (r.error) { alert(r.error); loadPendingPayments(); return }
   alert(r.novoVencimento ? \`Pagamento confirmado! Novo vencimento: \${r.novoVencimento}\` : 'Pagamento confirmado!')
   loadPendingPayments()
 }

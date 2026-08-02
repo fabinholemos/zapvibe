@@ -177,8 +177,13 @@ async function processWebhook(data) {
     return
   }
 
-  // Comprovante de pagamento — imagem recebida de um contato conhecido vira "pagamento pendente"
-  if (msg.message?.imageMessage) {
+  // Comprovante de pagamento — imagem ou PDF recebido de um contato conhecido vira "pagamento pendente"
+  const comprovanteMedia = msg.message?.imageMessage
+    ? { key: 'imageMessage', mimetype: msg.message.imageMessage.mimetype || 'image/jpeg' }
+    : (msg.message?.documentMessage?.mimetype === 'application/pdf'
+        ? { key: 'documentMessage', mimetype: 'application/pdf' }
+        : null)
+  if (comprovanteMedia) {
     const allCtsImg = await db.getContacts(userId).catch(() => [])
     const payContact = allCtsImg.find(c => {
       const n = c.telefone.replace(/\D/g, '')
@@ -193,13 +198,13 @@ async function processWebhook(data) {
             telefone: payContact.telefone,
             nome: payContact.nome || pushName || '',
             imageBase64: media.base64,
-            mimetype: media.mimetype || 'image/jpeg',
+            mimetype: media.mimetype || comprovanteMedia.mimetype,
             instanceName
           }, userId)
           const confirmText = 'Recebemos seu comprovante! Vamos confirmar e já atualizamos sua renovação. ✓'
           rememberOutboundMessage(userId, phone, confirmText)
           await sendWhatsapp(sendTo, confirmText, instanceName).catch(() => {})
-          console.log('[Pagamento] comprovante recebido de', phone, '(', payContact.nome, ')')
+          console.log('[Pagamento] comprovante recebido de', phone, '(', payContact.nome, ') tipo:', comprovanteMedia.key)
         } else {
           console.log('[Pagamento] mídia sem base64 para', phone)
         }
