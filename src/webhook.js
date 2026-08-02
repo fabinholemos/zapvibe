@@ -193,7 +193,8 @@ async function processWebhook(data) {
             telefone: payContact.telefone,
             nome: payContact.nome || pushName || '',
             imageBase64: media.base64,
-            mimetype: media.mimetype || 'image/jpeg'
+            mimetype: media.mimetype || 'image/jpeg',
+            instanceName
           }, userId)
           const confirmText = 'Recebemos seu comprovante! Vamos confirmar e já atualizamos sua renovação. ✓'
           rememberOutboundMessage(userId, phone, confirmText)

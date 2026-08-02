@@ -170,6 +170,12 @@ textarea{resize:vertical}
       </div>
     </div>
 
+    <!-- Lightbox de imagem (comprovante) -->
+    <div id="img-lightbox" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4" onclick="closeImageLightbox()">
+      <img id="img-lightbox-img" src="" class="max-w-full max-h-full rounded-lg"/>
+      <button onclick="closeImageLightbox()" class="absolute top-4 right-4 text-white text-2xl">✕</button>
+    </div>
+
     <!-- Anti-spam summary -->
     <div class="bg-gray-900 border border-gray-800 rounded-2xl p-4">
       <p class="text-xs text-gray-500 uppercase tracking-wider mb-3">Última mensagem por contato</p>
@@ -2081,6 +2087,14 @@ async function addWaGroup() {
 }
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
+function openImageLightbox(src) {
+  document.getElementById('img-lightbox-img').src = src
+  document.getElementById('img-lightbox').classList.remove('hidden')
+}
+function closeImageLightbox() {
+  document.getElementById('img-lightbox').classList.add('hidden')
+}
+
 async function loadPendingPayments() {
   const list = await fetch('/api/pending-payments').then(r=>r.json()).catch(()=>[])
   const el = document.getElementById('pending-payments-list')
@@ -2089,7 +2103,7 @@ async function loadPendingPayments() {
     const when = new Date(p.createdAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
     return \`
     <div class="flex gap-3 bg-gray-800 rounded-xl p-3">
-      <img src="data:\${p.mimetype};base64,\${p.imageBase64}" class="w-16 h-16 object-cover rounded-lg cursor-pointer flex-shrink-0" onclick="window.open(this.src)"/>
+      <img src="data:\${p.mimetype};base64,\${p.imageBase64}" class="w-16 h-16 object-cover rounded-lg cursor-pointer flex-shrink-0" onclick="openImageLightbox(this.src)"/>
       <div class="flex-1 min-w-0">
         <p class="text-xs font-medium">\${esc(p.nome || 'Sem nome')}</p>
         <p class="text-xs text-gray-500">\${esc(p.telefone)} · \${when}</p>
@@ -3358,7 +3372,16 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.startsWith('/api/pending-payments/') && url.endsWith('/confirm') && method === 'POST') {
     const id = url.split('/')[3]
-    json(await db.confirmPendingPayment(id, userId)); return
+    const r = await db.confirmPendingPayment(id, userId)
+    if (r.ok) {
+      const userRow = await db.getUserById(userId).catch(() => null)
+      const instanceName = r.instanceName || userRow?.instance_name || INSTANCE
+      const msg = r.novoVencimento
+        ? `Pagamento confirmado! ✅ Sua renovação foi atualizada, novo vencimento: ${r.novoVencimento}. Obrigado!`
+        : `Pagamento confirmado! ✅ Obrigado!`
+      sendWhatsapp(r.telefone, msg, instanceName).catch(() => {})
+    }
+    json(r); return
   }
   if (url.startsWith('/api/pending-payments/') && url.endsWith('/reject') && method === 'POST') {
     const id = url.split('/')[3]
