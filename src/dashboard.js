@@ -148,6 +148,7 @@ textarea{resize:vertical}
     <button onclick="tab('auto')" id="t-auto" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">🤖 Respostas</button>
     <button onclick="tab('auto2')" id="t-auto2" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">⚡ Automações</button>
     <button onclick="tab('hist')" id="t-hist" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">📊 Histórico</button>
+    <button onclick="tab('funnel')" id="t-funnel" class="tab flex-1 py-1.5 text-xs font-medium rounded-lg text-gray-400 hover:text-white">🎯 Funil</button>
   </div>
 
   <!-- ── TAB: Histórico ── -->
@@ -185,6 +186,38 @@ textarea{resize:vertical}
       </div>
       <div id="hist-list" class="divide-y divide-gray-800">
         <p class="text-xs text-gray-600 text-center py-8">Nenhuma campanha enviada ainda.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB: Funil ── -->
+  <div id="p-funnel" class="hidden fade space-y-4">
+    <div class="flex items-center justify-between">
+      <p class="text-sm text-gray-400">Funil visual — acompanhe seus leads e clientes por etapa. Arraste os cards entre as colunas.</p>
+      <div class="flex gap-2 flex-shrink-0">
+        <button onclick="openAddStageModal()" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg whitespace-nowrap">+ Nova coluna</button>
+        <button onclick="loadFunnel()" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs rounded-lg">↻</button>
+      </div>
+    </div>
+    <div id="funnel-board" class="flex gap-3 overflow-x-auto pb-4">
+      <p class="text-xs text-gray-600">Carregando...</p>
+    </div>
+  </div>
+
+  <!-- Funnel card modal -->
+  <div id="funnel-card-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+    <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 id="funnel-card-modal-title" class="text-white font-semibold">Novo lead</h3>
+        <button onclick="closeFunnelCardModal()" class="text-gray-500 hover:text-gray-300">✕</button>
+      </div>
+      <input id="fc-nome" placeholder="Nome *" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+      <input id="fc-telefone" placeholder="Telefone" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+      <input id="fc-empresa" placeholder="Empresa (opcional)" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500"/>
+      <textarea id="fc-notes" rows="3" placeholder="Notas (opcional)" class="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-violet-500 resize-none"></textarea>
+      <div class="flex gap-2">
+        <button onclick="saveFunnelCard()" class="flex-1 py-2 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-xl">Salvar</button>
+        <button id="fc-delete-btn" onclick="deleteFunnelCardConfirm()" class="hidden px-4 py-2 bg-red-700 hover:bg-red-600 text-white text-sm rounded-xl">Excluir</button>
       </div>
     </div>
   </div>
@@ -877,7 +910,7 @@ let _currentMedia = null // { base64, mimetype, filename, mediatype } — mídia
 
 // ── Tabs ─────────────────────────────────────────────────────────────────────
 function tab(id) {
-  ['conn','contacts','campaign','auto','auto2','hist'].forEach(t => {
+  ['conn','contacts','campaign','auto','auto2','hist','funnel'].forEach(t => {
     document.getElementById('p-'+t).classList.add('hidden')
     document.getElementById('t-'+t).classList.remove('tab-active')
     document.getElementById('t-'+t).classList.add('text-gray-400')
@@ -891,6 +924,7 @@ function tab(id) {
   if (id === 'auto') { loadAutoList(); checkWebhookStatus() }
   if (id === 'auto2') { loadVencimentoRules(); loadDrips(); loadScheduledList() }
   if (id === 'hist') { loadHistory(); loadPendingPayments() }
+  if (id === 'funnel') loadFunnel()
 }
 
 // ── Connection ────────────────────────────────────────────────────────────────
@@ -2078,6 +2112,146 @@ async function addWaGroup() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Adicionar' }
   }
+}
+
+// ── Funil visual (Kanban) ──────────────────────────────────────────────────────
+let funnelStages = []
+let funnelCards = []
+let funnelEditingCardId = null
+let funnelAddStageId = null
+let funnelDraggingCardId = null
+
+async function loadFunnel() {
+  const [stages, cards] = await Promise.all([
+    fetch('/api/funnel/stages').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/funnel/cards').then(r=>r.json()).catch(()=>[])
+  ])
+  funnelStages = stages
+  funnelCards = cards
+  renderFunnel()
+}
+
+function renderFunnel() {
+  const board = document.getElementById('funnel-board')
+  if (!funnelStages.length) { board.innerHTML = '<p class="text-xs text-gray-600">Nenhuma coluna ainda.</p>'; return }
+  board.innerHTML = funnelStages.map(s => {
+    const cards = funnelCards.filter(c => c.stageId === s.id).sort((a,b) => a.position - b.position)
+    return \`
+    <div class="flex-shrink-0 w-64 bg-gray-900 border border-gray-800 rounded-2xl flex flex-col max-h-[70vh]" ondragover="event.preventDefault()" ondrop="onFunnelDrop(event, '\${s.id}')">
+      <div class="flex items-center justify-between px-3 py-2.5 border-b border-gray-800 gap-1">
+        <input value="\${esc(s.name)}" onchange="renameFunnelStage('\${s.id}', this.value)" class="bg-transparent text-xs font-semibold text-gray-300 outline-none w-32 truncate"/>
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          <span class="text-xs text-gray-600">\${cards.length}</span>
+          <button onclick="deleteFunnelStageConfirm('\${s.id}')" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-2 space-y-2">
+        \${cards.map(c => \`
+          <div draggable="true" ondragstart="onFunnelDragStart(event, '\${c.id}')" onclick="openEditCardModal('\${c.id}')" class="bg-gray-800 hover:bg-gray-700 rounded-xl p-2.5 cursor-grab">
+            <p class="text-xs font-medium">\${esc(c.nome)}</p>
+            \${c.telefone ? \`<p class="text-xs text-gray-500">\${esc(c.telefone)}</p>\` : ''}
+            \${c.empresa ? \`<p class="text-xs text-gray-600">\${esc(c.empresa)}</p>\` : ''}
+          </div>
+        \`).join('')}
+      </div>
+      <button onclick="openAddCardModal('\${s.id}')" class="text-xs text-gray-500 hover:text-gray-300 px-3 py-2 border-t border-gray-800">+ Adicionar</button>
+    </div>\`
+  }).join('') + \`
+    <div class="flex-shrink-0 w-64">
+      <button onclick="openAddStageModal()" class="w-full h-12 border-2 border-dashed border-gray-800 hover:border-gray-700 rounded-2xl text-xs text-gray-600 hover:text-gray-400">+ Nova coluna</button>
+    </div>\`
+}
+
+function onFunnelDragStart(e, cardId) {
+  funnelDraggingCardId = cardId
+  e.dataTransfer.effectAllowed = 'move'
+}
+
+async function onFunnelDrop(e, stageId) {
+  e.preventDefault()
+  if (!funnelDraggingCardId) return
+  const cardId = funnelDraggingCardId
+  funnelDraggingCardId = null
+  const card = funnelCards.find(c => c.id === cardId)
+  if (!card || card.stageId === stageId) return
+  card.stageId = stageId
+  renderFunnel()
+  await fetch(\`/api/funnel/cards/\${cardId}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ stageId }) })
+}
+
+async function renameFunnelStage(id, name) {
+  if (!name.trim()) return
+  await fetch(\`/api/funnel/stages/\${id}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: name.trim() }) })
+  const s = funnelStages.find(s => s.id === id); if (s) s.name = name.trim()
+}
+
+async function deleteFunnelStageConfirm(id) {
+  const cardsHere = funnelCards.filter(c => c.stageId === id)
+  const msg = cardsHere.length
+    ? \`Excluir essa coluna? Os \${cardsHere.length} card(s) dela vão pra primeira coluna.\`
+    : 'Excluir essa coluna?'
+  if (!confirm(msg)) return
+  await fetch(\`/api/funnel/stages/\${id}\`, { method:'DELETE' })
+  loadFunnel()
+}
+
+async function openAddStageModal() {
+  const name = prompt('Nome da nova coluna:')
+  if (!name || !name.trim()) return
+  await fetch('/api/funnel/stages', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name: name.trim() }) })
+  loadFunnel()
+}
+
+function openAddCardModal(stageId) {
+  funnelEditingCardId = null
+  funnelAddStageId = stageId
+  document.getElementById('funnel-card-modal-title').textContent = 'Novo lead'
+  document.getElementById('fc-nome').value = ''
+  document.getElementById('fc-telefone').value = ''
+  document.getElementById('fc-empresa').value = ''
+  document.getElementById('fc-notes').value = ''
+  document.getElementById('fc-delete-btn').classList.add('hidden')
+  document.getElementById('funnel-card-modal').classList.remove('hidden')
+}
+
+function openEditCardModal(id) {
+  const c = funnelCards.find(x => x.id === id)
+  if (!c) return
+  funnelEditingCardId = id
+  document.getElementById('funnel-card-modal-title').textContent = 'Editar lead'
+  document.getElementById('fc-nome').value = c.nome || ''
+  document.getElementById('fc-telefone').value = c.telefone || ''
+  document.getElementById('fc-empresa').value = c.empresa || ''
+  document.getElementById('fc-notes').value = c.notes || ''
+  document.getElementById('fc-delete-btn').classList.remove('hidden')
+  document.getElementById('funnel-card-modal').classList.remove('hidden')
+}
+
+function closeFunnelCardModal() {
+  document.getElementById('funnel-card-modal').classList.add('hidden')
+}
+
+async function saveFunnelCard() {
+  const nome = document.getElementById('fc-nome').value.trim()
+  const telefone = document.getElementById('fc-telefone').value.trim()
+  const empresa = document.getElementById('fc-empresa').value.trim()
+  const notes = document.getElementById('fc-notes').value.trim()
+  if (!nome) { alert('Nome obrigatório'); return }
+  if (funnelEditingCardId) {
+    await fetch(\`/api/funnel/cards/\${funnelEditingCardId}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome, telefone, empresa, notes }) })
+  } else {
+    await fetch('/api/funnel/cards', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nome, telefone, empresa, notes, stageId: funnelAddStageId }) })
+  }
+  closeFunnelCardModal()
+  loadFunnel()
+}
+
+async function deleteFunnelCardConfirm() {
+  if (!funnelEditingCardId) return
+  if (!confirm('Excluir esse lead do funil?')) return
+  await fetch(\`/api/funnel/cards/\${funnelEditingCardId}\`, { method:'DELETE' })
+  closeFunnelCardModal()
+  loadFunnel()
 }
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
@@ -3373,6 +3547,45 @@ const server = http.createServer(async (req, res) => {
     const token = await db.getOrCreateWebhookToken(userId)
     const baseUrl = process.env.WEBHOOK_BASE_URL || `http://host.docker.internal:${PORT}`
     json({ token, url: `${baseUrl}/api/contacts/webhook` }); return
+  }
+
+  if (url === '/api/funnel/stages' && method === 'GET') {
+    json(await db.getFunnelStages(userId)); return
+  }
+  if (url === '/api/funnel/stages' && method === 'POST') {
+    const body = await readBody(req)
+    if (!body.name?.trim()) { json({ error: 'nome obrigatório' }, 400); return }
+    json(await db.addFunnelStage(body.name.trim(), userId)); return
+  }
+  if (url.startsWith('/api/funnel/stages/') && method === 'PUT') {
+    const id = url.split('/')[4]
+    const body = await readBody(req)
+    await db.updateFunnelStage(id, body, userId)
+    json({ ok: true }); return
+  }
+  if (url.startsWith('/api/funnel/stages/') && method === 'DELETE') {
+    const id = url.split('/')[4]
+    await db.deleteFunnelStage(id, userId)
+    json({ ok: true }); return
+  }
+  if (url === '/api/funnel/cards' && method === 'GET') {
+    json(await db.getFunnelCards(userId)); return
+  }
+  if (url === '/api/funnel/cards' && method === 'POST') {
+    const body = await readBody(req)
+    if (!body.nome?.trim()) { json({ error: 'nome obrigatório' }, 400); return }
+    json(await db.addFunnelCard(body, userId)); return
+  }
+  if (url.startsWith('/api/funnel/cards/') && method === 'PUT') {
+    const id = url.split('/')[4]
+    const body = await readBody(req)
+    await db.updateFunnelCard(id, body, userId)
+    json({ ok: true }); return
+  }
+  if (url.startsWith('/api/funnel/cards/') && method === 'DELETE') {
+    const id = url.split('/')[4]
+    await db.deleteFunnelCard(id, userId)
+    json({ ok: true }); return
   }
 
   if (url === '/api/pending-payments' && method === 'GET') {

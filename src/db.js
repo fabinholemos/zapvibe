@@ -126,6 +126,25 @@ async function init() {
       last_run_date TEXT DEFAULT '',
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS funnel_stages (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      position INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS funnel_cards (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      stage_id TEXT NOT NULL,
+      nome TEXT DEFAULT '',
+      telefone TEXT DEFAULT '',
+      empresa TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      position INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS pending_payments (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -328,6 +347,90 @@ async function upsertContactByPhone(c, userId) {
     [userId, c.nome || '', telefone, c.empresa || '', c.extra || '', c.vencimento || '']
   )
   return { created: true, updated: false }
+}
+
+// ── Funil visual (Kanban) ──────────────────────────────────────────────────────
+
+async function addFunnelStage(name, userId, position) {
+  const id = `stage_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  if (position === undefined) {
+    const { rows } = await pool.query('SELECT COALESCE(MAX(position),-1)+1 as p FROM funnel_stages WHERE user_id=$1', [userId])
+    position = rows[0].p
+  }
+  await pool.query('INSERT INTO funnel_stages (id, user_id, name, position) VALUES ($1,$2,$3,$4)', [id, userId, name, position])
+  return { id, name, position }
+}
+
+async function getFunnelStages(userId) {
+  const { rows } = await pool.query('SELECT id, name, position FROM funnel_stages WHERE user_id=$1 ORDER BY position, created_at', [userId])
+  if (rows.length) return rows
+  const defaults = ['Novo contato', 'Negociando', 'Aguardando pagamento', 'Cliente ativo', 'Perdido']
+  for (let i = 0; i < defaults.length; i++) await addFunnelStage(defaults[i], userId, i)
+  const { rows: seeded } = await pool.query('SELECT id, name, position FROM funnel_stages WHERE user_id=$1 ORDER BY position, created_at', [userId])
+  return seeded
+}
+
+async function updateFunnelStage(id, updates, userId) {
+  const { rows } = await pool.query('SELECT * FROM funnel_stages WHERE id=$1 AND user_id=$2', [id, userId])
+  const cur = rows[0]; if (!cur) return
+  await pool.query('UPDATE funnel_stages SET name=$1, position=$2 WHERE id=$3 AND user_id=$4', [
+    updates.name !== undefined ? updates.name : cur.name,
+    updates.position !== undefined ? updates.position : cur.position,
+    id, userId
+  ])
+}
+
+async function deleteFunnelStage(id, userId) {
+  const { rows } = await pool.query('SELECT id FROM funnel_stages WHERE user_id=$1 AND id != $2 ORDER BY position LIMIT 1', [userId, id])
+  const fallback = rows[0]
+  if (fallback) {
+    await pool.query('UPDATE funnel_cards SET stage_id=$1 WHERE stage_id=$2 AND user_id=$3', [fallback.id, id, userId])
+  } else {
+    await pool.query('DELETE FROM funnel_cards WHERE stage_id=$1 AND user_id=$2', [id, userId])
+  }
+  await pool.query('DELETE FROM funnel_stages WHERE id=$1 AND user_id=$2', [id, userId])
+}
+
+async function getFunnelCards(userId) {
+  const { rows } = await pool.query(
+    `SELECT id, stage_id as "stageId", nome, telefone, empresa, notes, position, created_at as "createdAt"
+     FROM funnel_cards WHERE user_id=$1 ORDER BY position, created_at`,
+    [userId]
+  )
+  return rows
+}
+
+async function addFunnelCard(c, userId) {
+  const id = `card_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  const { rows } = await pool.query('SELECT COALESCE(MAX(position),-1)+1 as p FROM funnel_cards WHERE user_id=$1 AND stage_id=$2', [userId, c.stageId])
+  const position = rows[0].p
+  await pool.query(
+    'INSERT INTO funnel_cards (id, user_id, stage_id, nome, telefone, empresa, notes, position) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [id, userId, c.stageId, c.nome || '', c.telefone || '', c.empresa || '', c.notes || '', position]
+  )
+  return { id, stageId: c.stageId, nome: c.nome || '', telefone: c.telefone || '', empresa: c.empresa || '', notes: c.notes || '', position }
+}
+
+async function updateFunnelCard(id, updates, userId) {
+  const { rows } = await pool.query('SELECT * FROM funnel_cards WHERE id=$1 AND user_id=$2', [id, userId])
+  const cur = rows[0]; if (!cur) return
+  await pool.query(
+    `UPDATE funnel_cards SET stage_id=$1, nome=$2, telefone=$3, empresa=$4, notes=$5, position=$6, updated_at=NOW()
+     WHERE id=$7 AND user_id=$8`,
+    [
+      updates.stageId !== undefined ? updates.stageId : cur.stage_id,
+      updates.nome !== undefined ? updates.nome : cur.nome,
+      updates.telefone !== undefined ? updates.telefone : cur.telefone,
+      updates.empresa !== undefined ? updates.empresa : cur.empresa,
+      updates.notes !== undefined ? updates.notes : cur.notes,
+      updates.position !== undefined ? updates.position : cur.position,
+      id, userId
+    ]
+  )
+}
+
+async function deleteFunnelCard(id, userId) {
+  await pool.query('DELETE FROM funnel_cards WHERE id=$1 AND user_id=$2', [id, userId])
 }
 
 // ── Pagamentos pendentes (comprovante manual via WhatsApp) ────────────────────
@@ -1022,6 +1125,8 @@ module.exports = {
   getContacts, saveContacts, addContact, updateContact, deleteContact, setOptout, clearOptout, upsertContactByPhone,
   getOrCreateWebhookToken, getUserByWebhookToken,
   addPendingPayment, getPendingPayments, confirmPendingPayment, rejectPendingPayment,
+  addFunnelStage, getFunnelStages, updateFunnelStage, deleteFunnelStage,
+  getFunnelCards, addFunnelCard, updateFunnelCard, deleteFunnelCard,
   getUserInstances, countUserInstances, addUserInstance, updateUserInstanceLabel, updateUserInstanceEnabled, deleteUserInstance,
   getDraft, saveDraft,
   getTemplates, getTemplateById, addTemplate, updateTemplate, deleteTemplate,
