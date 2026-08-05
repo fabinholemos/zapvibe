@@ -2256,6 +2256,7 @@ async function deleteFunnelCardConfirm() {
 
 // ── Histórico ─────────────────────────────────────────────────────────────────
 let pendingPaymentsCache = []
+let pendingPaymentsContactsCache = []
 
 function openComprovanteInNewTab(id) {
   const p = pendingPaymentsCache.find(x => x.id === id)
@@ -2270,8 +2271,12 @@ function openComprovanteInNewTab(id) {
 }
 
 async function loadPendingPayments() {
-  const list = await fetch('/api/pending-payments').then(r=>r.json()).catch(()=>[])
+  const [list, cts] = await Promise.all([
+    fetch('/api/pending-payments').then(r=>r.json()).catch(()=>[]),
+    fetch('/api/contacts').then(r=>r.json()).catch(()=>[])
+  ])
   pendingPaymentsCache = list
+  pendingPaymentsContactsCache = cts
   const el = document.getElementById('pending-payments-list')
   if (!list.length) { el.innerHTML = '<p class="text-xs text-gray-600 text-center py-4">Nenhum comprovante aguardando confirmação.</p>'; return }
   el.innerHTML = list.map(p => {
@@ -2280,13 +2285,24 @@ async function loadPendingPayments() {
     const preview = isPdf
       ? \`<div onclick="openComprovanteInNewTab('\${p.id}')" class="w-16 h-16 flex items-center justify-center bg-gray-700 rounded-lg cursor-pointer flex-shrink-0 text-2xl">📄</div>\`
       : \`<img src="data:\${p.mimetype};base64,\${p.imageBase64}" class="w-16 h-16 object-cover rounded-lg cursor-pointer flex-shrink-0" onclick="openComprovanteInNewTab('\${p.id}')"/>\`
+    const unidentified = !p.telefone
+    const linkPicker = unidentified
+      ? \`<div class="mt-2">
+          <p class="text-xs text-amber-400 mb-1">⚠️ Não identificado — vincule a um contato antes de confirmar</p>
+          <select id="link-\${p.id}" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-2 py-1.5 text-xs">
+            <option value="">Escolher contato...</option>
+            \${cts.map(c => \`<option value="\${c.telefone.replace(/\\D/g,'')}">\${esc(c.nome)} — \${esc(c.telefone)}</option>\`).join('')}
+          </select>
+        </div>\`
+      : ''
     return \`
     <div class="flex gap-3 bg-gray-800 rounded-xl p-3">
       \${preview}
       <div class="flex-1 min-w-0">
         <p class="text-xs font-medium">\${esc(p.nome || 'Sem nome')}</p>
-        <p class="text-xs text-gray-500">\${esc(p.telefone)} · \${when} \${isPdf?'· PDF':''}</p>
+        <p class="text-xs text-gray-500">\${p.telefone ? esc(p.telefone) : 'telefone não identificado'} · \${when} \${isPdf?'· PDF':''}</p>
         <p class="text-xs text-violet-400 cursor-pointer" onclick="openComprovanteInNewTab('\${p.id}')">Abrir \${isPdf?'PDF':'imagem'} em nova aba ↗</p>
+        \${linkPicker}
         <div class="flex gap-2 mt-2">
           <button id="btn-confirm-\${p.id}" onclick="confirmPendingPayment('\${p.id}')" class="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg">✓ Confirmar pagamento</button>
           <button onclick="rejectPendingPayment('\${p.id}')" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded-lg">✕ Rejeitar</button>
@@ -2299,8 +2315,11 @@ async function loadPendingPayments() {
 
 async function confirmPendingPayment(id) {
   const btn = document.getElementById(\`btn-confirm-\${id}\`)
+  const linkSel = document.getElementById(\`link-\${id}\`)
+  const telefone = linkSel ? linkSel.value : ''
+  if (linkSel && !telefone) { alert('Escolha um contato pra vincular antes de confirmar.'); return }
   if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = 'Confirmando...' }
-  const r = await fetch(\`/api/pending-payments/\${id}/confirm\`, { method:'POST' }).then(r=>r.json()).catch(()=>({}))
+  const r = await fetch(\`/api/pending-payments/\${id}/confirm\`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ telefone }) }).then(r=>r.json()).catch(()=>({}))
   if (r.error) { alert(r.error); loadPendingPayments(); return }
   alert(r.novoVencimento ? \`Pagamento confirmado! Novo vencimento: \${r.novoVencimento}\` : 'Pagamento confirmado!')
   loadPendingPayments()
@@ -3593,14 +3612,15 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.startsWith('/api/pending-payments/') && url.endsWith('/confirm') && method === 'POST') {
     const id = url.split('/')[3]
-    const r = await db.confirmPendingPayment(id, userId)
+    const body = await readBody(req).catch(() => ({}))
+    const r = await db.confirmPendingPayment(id, userId, body.telefone || '')
     if (r.ok) {
       const userRow = await db.getUserById(userId).catch(() => null)
       const instanceName = r.instanceName || userRow?.instance_name || INSTANCE
       const msg = r.novoVencimento
         ? `Pagamento confirmado! ✅ Sua renovação foi atualizada, novo vencimento: ${r.novoVencimento}. Obrigado!`
         : `Pagamento confirmado! ✅ Obrigado!`
-      sendWhatsapp(r.telefone, msg, instanceName).catch(() => {})
+      sendWhatsapp(r.jid || r.telefone, msg, instanceName).catch(() => {})
     }
     json(r); return
   }

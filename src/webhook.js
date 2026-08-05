@@ -189,22 +189,29 @@ async function processWebhook(data) {
       const n = c.telefone.replace(/\D/g, '')
       return phone.endsWith(n) || n.endsWith(phone) || ('55' + n) === phone || n === ('55' + phone)
     })
-    if (payContact && !payContact.optout) {
+    if (payContact && payContact.optout) {
+      // contato conhecido mas pediu pra sair — não processa
+    } else {
       try {
         const media = await downloadMedia(instanceName, msg.key.id)
         if (media?.base64) {
           await db.addPendingPayment({
             id: `pay_${Date.now()}_${phone}`,
-            telefone: payContact.telefone,
-            nome: payContact.nome || pushName || '',
+            telefone: payContact ? payContact.telefone : '',
+            nome: payContact ? payContact.nome : (pushName || 'Não identificado'),
             imageBase64: media.base64,
             mimetype: media.mimetype || comprovanteMedia.mimetype,
-            instanceName
+            instanceName,
+            jid: sendTo
           }, userId)
           const confirmText = 'Recebemos seu comprovante! Vamos confirmar e já atualizamos sua renovação. ✓'
           rememberOutboundMessage(userId, phone, confirmText)
           await sendWhatsapp(sendTo, confirmText, instanceName).catch(() => {})
-          console.log('[Pagamento] comprovante recebido de', phone, '(', payContact.nome, ') tipo:', comprovanteMedia.key)
+          if (payContact) {
+            console.log('[Pagamento] comprovante recebido de', phone, '(', payContact.nome, ') tipo:', comprovanteMedia.key)
+          } else {
+            console.log('[Pagamento] comprovante de remetente NÃO IDENTIFICADO (telefone não bateu, provavelmente @lid) — foi pra fila pra vínculo manual. jid:', jid, '| pushName:', pushName)
+          }
         } else {
           console.log('[Pagamento] mídia sem base64 para', phone)
         }

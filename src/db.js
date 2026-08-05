@@ -153,6 +153,7 @@ async function init() {
       image_base64 TEXT,
       mimetype TEXT DEFAULT 'image/jpeg',
       instance_name TEXT DEFAULT '',
+      jid TEXT DEFAULT '',
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       confirmed_at TIMESTAMPTZ
@@ -204,6 +205,7 @@ async function init() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMPTZ;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS webhook_token TEXT;
     ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS instance_name TEXT DEFAULT '';
+    ALTER TABLE pending_payments ADD COLUMN IF NOT EXISTS jid TEXT DEFAULT '';
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS vencimento TEXT DEFAULT '';
     ALTER TABLE contacts ADD COLUMN IF NOT EXISTS optout BOOLEAN DEFAULT FALSE;
@@ -448,26 +450,34 @@ function addMonthToVencimento(str) {
 
 async function addPendingPayment(p, userId) {
   await pool.query(
-    `INSERT INTO pending_payments (id, user_id, telefone, nome, image_base64, mimetype, instance_name, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'pending')`,
-    [p.id, userId, p.telefone, p.nome || '', p.imageBase64, p.mimetype || 'image/jpeg', p.instanceName || '']
+    `INSERT INTO pending_payments (id, user_id, telefone, nome, image_base64, mimetype, instance_name, jid, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')`,
+    [p.id, userId, p.telefone || '', p.nome || '', p.imageBase64, p.mimetype || 'image/jpeg', p.instanceName || '', p.jid || '']
   )
 }
 
 async function getPendingPayments(userId) {
   const { rows } = await pool.query(
-    `SELECT id, telefone, nome, image_base64 as "imageBase64", mimetype, instance_name as "instanceName", status, created_at as "createdAt"
+    `SELECT id, telefone, nome, image_base64 as "imageBase64", mimetype, instance_name as "instanceName", jid, status, created_at as "createdAt"
      FROM pending_payments WHERE user_id=$1 AND status='pending' ORDER BY created_at DESC`,
     [userId]
   )
   return rows
 }
 
-async function confirmPendingPayment(id, userId) {
+async function confirmPendingPayment(id, userId, overridePhone) {
+  const telefoneToUse = (overridePhone || '').replace(/\D/g, '')
+  const { rows: existingRows } = await pool.query('SELECT * FROM pending_payments WHERE id=$1 AND user_id=$2', [id, userId])
+  const existing = existingRows[0]
+  if (!existing) return { error: 'Pagamento não encontrado' }
+  if (!existing.telefone && !telefoneToUse) {
+    return { error: 'Esse comprovante não está vinculado a nenhum contato ainda. Escolha um contato antes de confirmar.' }
+  }
+
   const { rows } = await pool.query(
-    `UPDATE pending_payments SET status='confirmed', confirmed_at=NOW()
-     WHERE id=$1 AND user_id=$2 AND status='pending' RETURNING *`,
-    [id, userId]
+    `UPDATE pending_payments SET status='confirmed', confirmed_at=NOW(), telefone=COALESCE(NULLIF($1,''), telefone)
+     WHERE id=$2 AND user_id=$3 AND status='pending' RETURNING *`,
+    [telefoneToUse, id, userId]
   )
   const p = rows[0]
   if (!p) return { error: 'Esse pagamento já foi processado ou não existe.' }
@@ -481,7 +491,7 @@ async function confirmPendingPayment(id, userId) {
       await pool.query('UPDATE contacts SET vencimento=$1 WHERE id=$2', [novoVencimento, contact.id])
     }
   }
-  return { ok: true, novoVencimento, telefone: p.telefone, nome: p.nome, instanceName: p.instance_name }
+  return { ok: true, novoVencimento, telefone: p.telefone, nome: contact?.nome || p.nome, instanceName: p.instance_name, jid: p.jid }
 }
 
 async function rejectPendingPayment(id, userId) {
