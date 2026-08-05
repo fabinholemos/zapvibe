@@ -495,6 +495,18 @@ textarea{resize:vertical}
       </div>
     </div>
 
+    <!-- Group diagnostic modal -->
+    <div id="group-diag-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-lg space-y-3 max-h-[85vh] overflow-y-auto">
+        <div class="flex items-center justify-between">
+          <h3 id="group-diag-title" class="text-white font-semibold">🔍 Diagnóstico do grupo</h3>
+          <button onclick="closeGroupDiagModal()" class="text-gray-500 hover:text-gray-300">✕</button>
+        </div>
+        <div id="group-diag-list" class="space-y-1.5"></div>
+        <div id="group-diag-actions"></div>
+      </div>
+    </div>
+
     <!-- Groups chips -->
     <div class="flex items-center gap-2 mb-3 flex-wrap">
       <span class="text-xs text-gray-500">Grupo:</span>
@@ -1960,9 +1972,57 @@ function renderGroupChips() {
       <button onclick="setActiveGroup('\${g.id}')" class="px-3 py-1 text-xs rounded-full \${activeGroup===g.id ? 'bg-violet-700 text-white font-medium' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'} transition-colors">
         📁 \${esc(g.name)} (\${g.phones.length})
       </button>
+      <button onclick="diagnosticarGrupo('\${g.id}')" title="Diagnosticar" class="text-gray-600 hover:text-amber-400 text-xs transition-colors">🔍</button>
       <button onclick="deleteGroup('\${g.id}')" class="text-gray-600 hover:text-red-400 text-xs transition-colors">✕</button>
     </span>\`).join('')
   el.innerHTML = allBtn + chips
+}
+
+function diagnosticarGrupo(id) {
+  const grp = groups.find(g => g.id === id)
+  if (!grp) return
+  document.getElementById('group-diag-title').textContent = \`🔍 Diagnóstico: \${grp.name}\`
+  const rows = grp.phones.map(p => {
+    const match = contacts.find(c => {
+      const cn = c.telefone.replace(/\D/g,'')
+      const gp = (p || '').replace(/\D/g,'')
+      return gp === cn || gp.endsWith(cn) || cn.endsWith(gp) || ('55'+gp) === cn || gp === ('55'+cn)
+    })
+    return { phone: p, match }
+  })
+  const orphans = rows.filter(r => !r.match)
+  const listEl = document.getElementById('group-diag-list')
+  listEl.innerHTML = rows.map(r => \`
+    <div class="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2 text-xs">
+      <span class="\${r.match ? 'text-gray-300' : 'text-red-400'}">\${esc(r.phone)}</span>
+      <span class="\${r.match ? 'text-emerald-400' : 'text-red-400'}">\${r.match ? '✓ ' + esc(r.match.nome) : '✕ nenhum contato encontrado'}</span>
+    </div>
+  \`).join('')
+  const actionsEl = document.getElementById('group-diag-actions')
+  actionsEl.innerHTML = orphans.length
+    ? \`<button onclick="limparOrfaosGrupo('\${id}')" class="w-full py-2 bg-red-700 hover:bg-red-600 text-white text-xs font-medium rounded-xl">Remover \${orphans.length} número(s) órfão(s) do grupo</button>\`
+    : '<p class="text-xs text-emerald-400 text-center">Todos os números do grupo batem com contatos existentes ✓</p>'
+  document.getElementById('group-diag-modal').classList.remove('hidden')
+}
+
+function closeGroupDiagModal() {
+  document.getElementById('group-diag-modal').classList.add('hidden')
+}
+
+async function limparOrfaosGrupo(id) {
+  const grp = groups.find(g => g.id === id)
+  if (!grp) return
+  if (!confirm('Remover os números órfãos desse grupo? Essa ação não pode ser desfeita.')) return
+  const validPhones = grp.phones.filter(p => contacts.some(c => {
+    const cn = c.telefone.replace(/\D/g,'')
+    const gp = (p || '').replace(/\D/g,'')
+    return gp === cn || gp.endsWith(cn) || cn.endsWith(gp) || ('55'+gp) === cn || gp === ('55'+cn)
+  }))
+  await fetch(\`/api/groups/\${id}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ phones: validPhones }) })
+  grp.phones = validPhones
+  closeGroupDiagModal()
+  renderGroupChips()
+  filterContacts()
 }
 
 function setActiveGroup(id) {
