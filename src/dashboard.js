@@ -9,6 +9,17 @@ const { campaigns, getCampaign, runCampaign } = require('./campaign')
 const { processWebhook, configureWebhook, configureWebhookForInstance } = require('./webhook')
 require('./crons')
 
+// Compara telefone de um contato contra a lista de telefones de um grupo, aceitando
+// variações de formato (com/sem DDI 55, com/sem 9º dígito).
+function phoneInGroup(grp, telefone) {
+  if (!grp || !Array.isArray(grp.phones)) return false
+  const n = (telefone || '').replace(/\D/g, '')
+  return grp.phones.some(p => {
+    const gp = (p || '').replace(/\D/g, '')
+    return gp === n || gp.endsWith(n) || n.endsWith(gp) || ('55' + gp) === n || gp === ('55' + n)
+  })
+}
+
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -1102,8 +1113,8 @@ function filterContacts() {
   const activeGrp = activeGroup ? (groups.find(g => g.id === activeGroup) || null) : null
   filtered = contacts.filter(c => {
     const tel = c.telefone.replace(/\D/g,'')
-    if (activeGrp && !activeGrp.phones.includes(tel)) return false
-    if (grpFilter && !grpFilter.phones.includes(tel)) return false
+    if (activeGrp && !phoneInGroup(activeGrp, c.telefone)) return false
+    if (grpFilter && !phoneInGroup(grpFilter, c.telefone)) return false
     return !q || (c.nome||'').toLowerCase().includes(q) ||
       (c.telefone||'').includes(q) ||
       (c.empresa||'').toLowerCase().includes(q)
@@ -1155,6 +1166,14 @@ function toggleAllContacts(checked) {
 }
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+function phoneInGroup(grp, telefone) {
+  if (!grp || !Array.isArray(grp.phones)) return false
+  const n = (telefone || '').replace(/\D/g,'')
+  return grp.phones.some(p => {
+    const gp = (p || '').replace(/\D/g,'')
+    return gp === n || gp.endsWith(n) || n.endsWith(gp) || ('55'+gp) === n || gp === ('55'+n)
+  })
+}
 
 function toggleAddForm() {
   const f = document.getElementById('add-form')
@@ -1185,7 +1204,7 @@ async function addContact() {
     const grp = groups.find(g => g.id === groupId)
     if (grp) {
       const phone = c.telefone.replace(/\D/g,'')
-      if (!grp.phones.includes(phone)) {
+      if (!phoneInGroup(grp, phone)) {
         grp.phones.push(phone)
         await fetch(\`/api/groups/\${groupId}\`, { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ phones: grp.phones }) })
       }
@@ -2029,7 +2048,7 @@ function applyCampGroup() {
     selected.clear()
     contacts.forEach((c, i) => {
       const phone = c.telefone.replace(/\D/g, '')
-      if (grp.phones.includes(phone)) selected.add(i)
+      if (phoneInGroup(grp, phone)) selected.add(i)
     })
   }
   updateCampSummary()
@@ -2581,7 +2600,7 @@ async function loadVfContactsPicker() {
 function renderVfPicker() {
   const groupId = document.getElementById('vf-group').value
   const grp = groupId ? vfAllGroups.find(g => g.id === groupId) : null
-  const lista = (grp ? vfAllContacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g,''))) : [...vfAllContacts])
+  const lista = (grp ? vfAllContacts.filter(c => phoneInGroup(grp, c.telefone)) : [...vfAllContacts])
     .sort((a,b) => (a.nome||'').localeCompare(b.nome||'', 'pt-BR'))
 
   const panel = document.getElementById('vf-picker-panel')
@@ -4042,7 +4061,7 @@ const server = http.createServer(async (req, res) => {
     if (body.groupId) {
       const groups = await db.getGroups(userId)
       const grp = groups.find(g => g.id === body.groupId)
-      if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))
+      if (grp) contacts = contacts.filter(c => phoneInGroup(grp, c.telefone))
     }
     const now = Date.now()
     const items = contacts.map((c, i) => ({

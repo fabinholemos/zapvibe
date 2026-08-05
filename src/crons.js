@@ -2,6 +2,18 @@ const db = require('./db')
 const { sendWhatsapp, sendWhatsappMedia, applyTemplate, INSTANCE } = require('./whatsapp')
 const { runCampaign } = require('./campaign')
 
+// Compara telefone de um contato contra a lista de telefones de um grupo, aceitando
+// variações de formato (com/sem DDI 55, com/sem 9º dígito) — evita "sumir" contato do
+// grupo por causa de diferença de formatação entre onde o número foi salvo.
+function phoneInGroup(grp, telefone) {
+  if (!grp || !Array.isArray(grp.phones)) return false
+  const n = (telefone || '').replace(/\D/g, '')
+  return grp.phones.some(p => {
+    const gp = (p || '').replace(/\D/g, '')
+    return gp === n || gp.endsWith(n) || n.endsWith(gp) || ('55' + gp) === n || gp === ('55' + n)
+  })
+}
+
 function parseVencimentoDate(str) {
   if (!str) return null
   // DD/MM/YYYY
@@ -31,7 +43,7 @@ async function checkSchedules() {
         } else if (s.group_id) {
           const groups = await db.getGroups(user.id).catch(() => [])
           const grp = groups.find(g => g.id === s.group_id)
-          if (grp) contacts = contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, '')))
+          if (grp) contacts = contacts.filter(c => phoneInGroup(grp, c.telefone))
         }
         const instanceName = user.instance_name || INSTANCE
         runCampaign(contacts, s.template, s.delay_min, s.delay_max, s.daily_limit, s.use_ai, null, s.template_id, s.template_name, user.id, instanceName)
@@ -66,7 +78,7 @@ async function checkVencimentos() {
         } else if (rule.groupId) {
           const groups = await db.getGroups(user.id).catch(() => [])
           const grp = groups.find(g => g.id === rule.groupId)
-          contacts = grp ? contacts.filter(c => grp.phones.includes(c.telefone.replace(/\D/g, ''))) : []
+          contacts = grp ? contacts.filter(c => phoneInGroup(grp, c.telefone)) : []
         }
         if (contacts.length) {
           const instanceName = rule.instanceName || user.instance_name || INSTANCE
