@@ -707,6 +707,7 @@ textarea{resize:vertical}
             <button onclick="closeManualSendModal()" class="text-gray-500 hover:text-gray-300">✕</button>
           </div>
           <p class="text-xs text-gray-400">Clique em "Abrir" pra cada contato — o WhatsApp abre com a mensagem já escrita, só falta apertar Enviar. Marque "enviado" pra acompanhar seu progresso.</p>
+          <div id="manual-send-media"></div>
           <div id="manual-send-list" class="space-y-2"></div>
         </div>
       </div>
@@ -1607,8 +1608,33 @@ function openManualSendModal() {
     if (!numero.startsWith('55')) numero = '55' + numero
     return { nome: c.nome, telefone: c.telefone, url: \`https://wa.me/\${numero}?text=\${encodeURIComponent(texto)}\`, enviado: false }
   })
+  document.getElementById('manual-send-media').innerHTML = ''
+  fetch('/api/media/full').then(r=>r.json()).then(m => {
+    if (!m) return
+    manualSendMediaCache = m
+    document.getElementById('manual-send-media').innerHTML = \`
+      <div class="bg-amber-950/40 border border-amber-800/50 rounded-xl px-3 py-2.5 text-xs text-amber-300 flex items-center justify-between gap-2">
+        <span>📎 Essa campanha tem mídia anexada (\${esc(m.filename||'arquivo')}). O link do WhatsApp não anexa isso sozinho — baixe uma vez e anexe manualmente em cada conversa.</span>
+        <button onclick="baixarMidiaCampanha()" class="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 text-white rounded-lg whitespace-nowrap flex-shrink-0">Baixar</button>
+      </div>\`
+  }).catch(()=>{})
   renderManualSendList()
   document.getElementById('manual-send-modal').classList.remove('hidden')
+}
+
+let manualSendMediaCache = null
+function baixarMidiaCampanha() {
+  if (!manualSendMediaCache) return
+  const byteChars = atob(manualSendMediaCache.base64)
+  const byteNumbers = new Array(byteChars.length)
+  for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i)
+  const byteArray = new Uint8Array(byteNumbers)
+  const blob = new Blob([byteArray], { type: manualSendMediaCache.mimetype })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = manualSendMediaCache.filename || 'midia-campanha'
+  a.click()
 }
 
 function closeManualSendModal() {
@@ -3892,6 +3918,10 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/media' && method === 'GET') {
     const m = mediaStore.get(userId)
     json(m ? { mediatype: m.mediatype, filename: m.filename, mimetype: m.mimetype } : null); return
+  }
+  if (url === '/api/media/full' && method === 'GET') {
+    const m = mediaStore.get(userId)
+    json(m || null); return
   }
 
   // Template (rascunho atual)
