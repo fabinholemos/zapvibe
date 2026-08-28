@@ -695,6 +695,19 @@ textarea{resize:vertical}
         <div class="flex gap-2">
           <button onclick="startCampaign()" id="btn-start" class="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-xl transition-colors">▶ Disparar</button>
           <button onclick="stopCampaign()" id="btn-stop" class="hidden px-5 py-2.5 bg-red-700 hover:bg-red-600 text-white font-semibold rounded-xl transition-colors">⏹ Parar</button>
+          <button onclick="openManualSendModal()" class="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-xl transition-colors" title="Gera um link do WhatsApp por contato, já com a mensagem pronta, pra você enviar manualmente um por um — útil pra números novos com risco de bloqueio.">📱 Enviar manualmente</button>
+        </div>
+      </div>
+
+      <!-- Manual sending modal -->
+      <div id="manual-send-modal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div class="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-lg space-y-3 max-h-[85vh] overflow-y-auto">
+          <div class="flex items-center justify-between">
+            <h3 class="text-white font-semibold">📱 Envio manual pelo WhatsApp</h3>
+            <button onclick="closeManualSendModal()" class="text-gray-500 hover:text-gray-300">✕</button>
+          </div>
+          <p class="text-xs text-gray-400">Clique em "Abrir" pra cada contato — o WhatsApp abre com a mensagem já escrita, só falta apertar Enviar. Marque "enviado" pra acompanhar seu progresso.</p>
+          <div id="manual-send-list" class="space-y-2"></div>
         </div>
       </div>
       <!-- Schedule toggle -->
@@ -1562,6 +1575,70 @@ async function deleteSelected() {
   await fetch('/api/contacts', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(contacts) })
   filtered = [...contacts]
   renderContacts()
+}
+
+// ── Envio manual (links do WhatsApp, um por contato) ───────────────────────────
+let manualSendList = []
+
+function applyTemplateJS(tpl, c) {
+  return (tpl || '')
+    .replace(/\{nome\}/gi, c.nome || '')
+    .replace(/\{empresa\}/gi, c.empresa || '')
+    .replace(/\{extra\}/gi, c.extra || '')
+    .replace(/\{telefone\}/gi, c.telefone || '')
+    .replace(/\{vencimento\}/gi, c.vencimento || '')
+}
+
+function getManualSendTargets() {
+  const remarketingContacts = window._remarketingContacts || null
+  return remarketingContacts
+    ? remarketingContacts
+    : (selected.size > 0 ? contacts.filter((_,i) => selected.has(i)) : contacts)
+}
+
+function openManualSendModal() {
+  const tpl = document.getElementById('tpl').value.trim()
+  if (!tpl) { alert('Escreva a mensagem antes.'); return }
+  const targets = getManualSendTargets()
+  if (!targets.length) { alert('Nenhum contato selecionado. Adicione ou selecione contatos primeiro.'); return }
+  manualSendList = targets.map(c => {
+    const texto = applyTemplateJS(tpl, c)
+    let numero = c.telefone.replace(/\D/g,'')
+    if (!numero.startsWith('55')) numero = '55' + numero
+    return { nome: c.nome, telefone: c.telefone, url: \`https://wa.me/\${numero}?text=\${encodeURIComponent(texto)}\`, enviado: false }
+  })
+  renderManualSendList()
+  document.getElementById('manual-send-modal').classList.remove('hidden')
+}
+
+function closeManualSendModal() {
+  document.getElementById('manual-send-modal').classList.add('hidden')
+}
+
+function renderManualSendList() {
+  const total = manualSendList.length
+  const done = manualSendList.filter(m => m.enviado).length
+  const el = document.getElementById('manual-send-list')
+  el.innerHTML = \`<p class="text-xs text-gray-500 mb-1">\${done} de \${total} marcados como enviados</p>\` +
+    manualSendList.map((m, i) => \`
+    <div class="flex items-center gap-2 bg-gray-800 rounded-xl px-3 py-2 \${m.enviado ? 'opacity-50' : ''}">
+      <label class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+        <input type="checkbox" \${m.enviado?'checked':''} onchange="toggleManualSent(\${i}, this.checked)" class="w-3.5 h-3.5 accent-emerald-600 flex-shrink-0"/>
+        <span class="text-xs truncate">\${esc(m.nome)} <span class="text-gray-500">— \${esc(m.telefone)}</span></span>
+      </label>
+      <a href="\${m.url}" target="_blank" onclick="marcarAoAbrir(\${i})" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 text-white text-xs rounded-lg flex-shrink-0">Abrir ↗</a>
+    </div>
+  \`).join('')
+}
+
+function marcarAoAbrir(i) {
+  manualSendList[i].enviado = true
+  renderManualSendList()
+}
+
+function toggleManualSent(i, checked) {
+  manualSendList[i].enviado = checked
+  renderManualSendList()
 }
 
 async function startCampaign() {
